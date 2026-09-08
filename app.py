@@ -106,8 +106,8 @@ def round_excel(val):
 # =========================================================================
 # 1. NẠP DỮ LIỆU TỪ SHEET T4.2026 (ĐƠN GIÁ LÀM TRÒN SỐ NGUYÊN)
 # =========================================================================
-st.subheader("1. DANH MỤC HÀNG HÓA TỪ SHEET T4.2026")
-file_upload = st.file_uploader("Kéo thả file THORK V6 PHAN BO BAN HANG.xlsx vào đây:", type=["xlsx"])
+st.subheader("1. DANH MỤC HÀNG HÓA")
+file_upload = st.file_uploader("Kéo thả file số liệu vào đây:", type=["xlsx"])
 
 if file_upload is not None:
     try:
