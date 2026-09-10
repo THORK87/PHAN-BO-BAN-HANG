@@ -8,5 +8,10 @@
         "client_name": "TAM",
         "expiry": "2027-01-01",
         "status": "blocked"
+    },
+    "00000-20260924-F3A2-CE50-6EB424": {
+        "client_name": "00000-20260924-F3A2-CE50",
+        "expiry": "2026-09-30",
+        "status": "active"
     }
 }
