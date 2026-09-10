@@ -127,8 +127,6 @@ if st.session_state.is_admin:
                 "expiry": ngay_het.strftime("%Y-%m-%d"),
                 "status": "active"
             }
-            }
-            
             if update_remote_licenses(db_licenses, file_sha):
                 st.success(f"Đã tạo Key thành công cho {c_name}!")
                 st.code(generated_key, language="text")
