@@ -5,178 +5,176 @@ import pandas as pd
 import numpy as np
 import io
 import math
+import secrets
+from datetime import datetime, date
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Phân Bổ Bán Hàng Chuẩn Excel", layout="wide")
-import hmac
-import hashlib
-from datetime import datetime, date
 
 # =========================================================================
-# HỆ THỐNG BẢN QUYỀN & TẠO KEY TRỰC TIẾP TRÊN WEB
+# CẤU HÌNH GITHUB DATABASE BẢN QUYỀN
 # =========================================================================
-SECRET_KEY = "KHUONG_BERUBCO_PRIVATE_2026"
-ADMIN_KEY = "Duykhuong@2026"  # Mật khẩu bí mật của riêng bạn
+GITHUB_REPO = st.secrets.get("GITHUB_REPO", "THORK87/PHAN-BO-BAN-HANG")
+GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
+FILE_PATH = "licenses.json"
+ADMIN_KEY = "Duykhuong@2026"  # Mật khẩu quản trị của bạn
 
-def kiem_tra_license(key_nhap):
+# Lấy token từ Secrets của Streamlit Cloud
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+
+HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json"
+}
+API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
+
+def get_remote_licenses():
     try:
-        parts = key_nhap.strip().upper().rsplit("-", 3)
-        if len(parts) != 4:
-            return False, "Định dạng License Key không đúng!"
-        
-        client_id, exp_str, s1, s2 = parts
-        sig_nhap = s1 + s2
-        
-        payload = f"{client_id}|{exp_str}"
-        sig_chuan = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:8].upper()
-        
-        if sig_nhap != sig_chuan:
-            return False, "License Key không hợp lệ hoặc đã bị chỉnh sửa!"
-        
-        exp_date = datetime.strptime(exp_str, "%Y%m%d")
-        if datetime.now() > exp_date:
-            return False, f"Bản quyền của [{client_id}] đã hết hạn vào ngày {exp_date.strftime('%d/%m/%Y')}!"
-            
-        return True, f"Kích hoạt thành công: {client_id} (Hạn dùng: {exp_date.strftime('%d/%m/%Y')})"
+        res = requests.get(f"{API_URL}?ref={GITHUB_BRANCH}", headers=HEADERS)
+        if res.status_code == 200:
+            data = res.json()
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            return json.loads(content), data["sha"]
     except Exception:
-        return False, "Mã kích hoạt không hợp lệ!"
+        pass
+    return {}, None
 
+import json
+
+def update_remote_licenses(new_data, sha=None):
+    try:
+        content_str = json.dumps(new_data, ensure_ascii=False, indent=4)
+        content_b64 = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
+        payload = {
+            "message": f"Update licenses.json via Admin - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            "content": content_b64,
+            "branch": GITHUB_BRANCH
+        }
+        if sha:
+            payload["sha"] = sha
+        res = requests.put(API_URL, headers=HEADERS, json=payload)
+        return res.status_code in [200, 201]
+    except Exception:
+        return False
+
+# Đọc dữ liệu từ GitHub
+db_licenses, file_sha = get_remote_licenses()
+
+# =========================================================================
+# 1. KIỂM TRA BẢN QUYỀN KHÁCH HÀNG (GIỮ NGUYÊN KEY)
+# =========================================================================
 if "is_licensed" not in st.session_state:
     st.session_state.is_licensed = False
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
 
-# GIAO DIỆN KHÓA PHẦN MỀM
 if not st.session_state.is_licensed and not st.session_state.is_admin:
     st.sidebar.title("🔐 KÍCH HOẠT BẢN QUYỀN")
     user_key = st.sidebar.text_input("Nhập mã License Key:", type="password")
     
     if st.sidebar.button("Kích hoạt"):
-        # Nhập mã Admin -> Mở giao diện tạo key
-        if user_key.strip() == ADMIN_KEY:
+        key_input = user_key.strip()
+        if key_input == ADMIN_KEY:
             st.session_state.is_admin = True
             st.rerun()
-        # Khách nhập key -> Kiểm tra bản quyền
-        else:
-            hop_le, thong_bao = kiem_tra_license(user_key)
-            if hop_le:
-                st.session_state.is_licensed = True
-                st.sidebar.success(thong_bao)
-                st.rerun()
+            
+        client_key = key_input.upper()
+        if client_key in db_licenses:
+            client_info = db_licenses[client_key]
+            if client_info.get("status") == "blocked":
+                st.sidebar.error("❌ Mã bản quyền này đã bị thu hồi hoặc khóa truy cập!")
             else:
-                st.sidebar.error(thong_bao)
+                exp_date = datetime.strptime(client_info["expiry"], "%Y-%m-%d").date()
+                if datetime.now().date() > exp_date:
+                    st.sidebar.error(f"❌ Bản quyền đã hết hạn vào ngày {exp_date.strftime('%d/%m/%Y')}!")
+                else:
+                    st.session_state.is_licensed = True
+                    st.sidebar.success(f"Hợp lệ! Hạn sử dụng: {exp_date.strftime('%d/%m/%Y')}")
+                    st.rerun()
+        else:
+            st.sidebar.error("Mã kích hoạt không tồn tại trên hệ thống!")
 
     st.warning("⚠️ Vui lòng nhập License Key ở thanh menu bên trái để mở khóa phần mềm.")
     st.stop()
 
 # =========================================================================
-# GIAO DIỆN TẠO & ĐỒNG BỘ KEY TRỰC TIẾP LÊN GITHUB (ADMIN)
+# 2. BẢNG ĐIỀU KHIỂN QUẢN TRỊ ADMIN (TẠO - GIA HẠN - HỦY)
 # =========================================================================
 if st.session_state.is_admin:
-    st.title("🔑 QUẢN TRỊ VIÊN - QUẢN LÝ LICENSE KEY (ĐỒNG BỘ GITHUB)")
-    st.info("Dữ liệu cấp key sẽ được commit trực tiếp vào kho lưu trữ GitHub để lưu vĩnh viễn.")
+    st.title("🔑 BẢNG QUẢN TRỊ BẢN QUYỀN (ĐỒNG BỘ GITHUB)")
+    st.info("Dữ liệu được lưu vĩnh viễn vào file licenses.json trên GitHub Repository.")
+    
+    tab_tao, tab_ql = st.tabs(["➕ Tạo Key Mới (Không ngày tháng)", "📋 Danh Sách & Gia Hạn / Hủy"])
 
-    tab_tao, tab_xem = st.tabs(["➕ Tạo Key Mới", "📋 Danh Sách Key Đã Cấp"])
-
-    FILE_PATH = "licenses_history.csv"
-
-    # Lấy thông tin kết nối từ Streamlit Secrets
-    gh_token = st.secrets.get("GITHUB_TOKEN", None)
-    gh_repo = st.secrets.get("GITHUB_REPO", None)
-    gh_branch = st.secrets.get("GITHUB_BRANCH", "main")
-
-    def doc_du_lieu_github():
-        """Hàm đọc file csv từ GitHub"""
-        if not gh_token or not gh_repo:
-            return pd.DataFrame(columns=["Khách hàng", "Ngày cấp", "Hạn sử dụng", "Mã License"]), None
-        url = f"https://api.github.com/repos/{gh_repo}/contents/{FILE_PATH}?ref={gh_branch}"
-        headers = {"Authorization": f"token {gh_token}"}
-        res = requests.get(url, headers=headers)
-        if res.status_code == 200:
-            data = res.json()
-            sha = data["sha"]
-            content = base64.b64decode(data["content"]).decode("utf-8-sig")
-            df = pd.read_csv(io.StringIO(content))
-            return df, sha
-        return pd.DataFrame(columns=["Khách hàng", "Ngày cấp", "Hạn sử dụng", "Mã License"]), None
-
-    def ghi_du_lieu_github(df_moi, sha=None):
-        """Hàm commit file csv đè lên GitHub"""
-        url = f"https://api.github.com/repos/{gh_repo}/contents/{FILE_PATH}"
-        headers = {
-            "Authorization": f"token {gh_token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        csv_str = df_moi.to_csv(index=False, encoding="utf-8-sig")
-        content_b64 = base64.b64encode(csv_str.encode("utf-8-sig")).decode("utf-8")
-        
-        payload = {
-            "message": f"Cập nhật License Key - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-            "content": content_b64,
-            "branch": gh_branch
-        }
-        if sha:
-            payload["sha"] = sha
-        
-        res = requests.put(url, headers=headers, json=payload)
-        return res.status_code in [200, 201]
-
+    # TAB 1: TẠO KEY MỚI
     with tab_tao:
-        c_admin1, c_admin2 = st.columns(2)
-        with c_admin1:
-            ten_khach = st.text_input("Tên khách hàng (viết liền không dấu):", value="CONGTY_ABC")
-        with c_admin2:
-            ngay_het_han = st.date_input("Hạn sử dụng đến ngày:", value=date(2026, 12, 31))
+        c1, c2 = st.columns(2)
+        with c1:
+            ten_khach = st.text_input("Tên/Mã định danh khách:", value="CONGTY_ABC")
+        with c2:
+            ngay_het = st.date_input("Hạn sử dụng ban đầu:", value=date(2027, 1, 1))
             
-        if st.button("🚀 BẤM ĐỂ TẠO & LƯU LÊN GITHUB", type="primary"):
-            client = ten_khach.strip().upper().replace(" ", "")
-            exp_str = ngay_het_han.strftime("%Y%m%d")
-            payload_sign = f"{client}|{exp_str}"
-            sig = hmac.new(SECRET_KEY.encode(), payload_sign.encode(), hashlib.sha256).hexdigest()[:8].upper()
+        if st.button("🚀 Tạo Key Cho Khách", type="primary"):
+            c_name = ten_khach.strip().upper().replace(" ", "")
+            # Sinh mã ngẫu nhiên 6 ký tự không chứa ngày tháng
+            random_code = secrets.token_hex(3).upper()
+            generated_key = f"{c_name}-{random_code}"
             
-            license_tao = f"{client}-{exp_str}-{sig[:4]}-{sig[4:8]}"
-            st.success(f"Mã của khách **{client}** (Hạn: {ngay_het_han.strftime('%d/%m/%Y')}):")
-            st.code(license_tao, language="text")
-
-            # Đọc file hiện tại từ GitHub, thêm dòng mới và ghi lại
-            if gh_token and gh_repo:
-                df_cu, sha = doc_du_lieu_github()
-                dong_moi = pd.DataFrame([{
-                    "Khách hàng": client,
-                    "Ngày cấp": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                    "Hạn sử dụng": ngay_het_han.strftime("%d/%m/%Y"),
-                    "Mã License": license_tao
-                }])
-                df_tong = pd.concat([df_cu, dong_moi], ignore_index=True).drop_duplicates(subset=["Mã License"])
-                
-                if ghi_du_lieu_github(df_tong, sha):
-                    st.toast("✅ Đã commit lưu trữ vĩnh viễn lên GitHub!")
-                else:
-                    st.error("Không thể ghi file lên GitHub. Vui lòng kiểm tra lại Token hoặc quyền repo.")
+            db_licenses[generated_key] = {
+                "client_name": c_name,
+                "expiry": ngay_het.strftime("%Y-%m-%d"),
+                "status": "active"
+            }
+            
+            if update_remote_licenses(db_licenses, file_sha):
+                st.success(f"Đã tạo Key thành công cho {c_name}!")
+                st.code(generated_key, language="text")
+                st.info("Gửi mã trên cho khách hàng. Khách sẽ dùng cố định mã này vĩnh viễn.")
+                st.rerun()
             else:
-                st.warning("Chưa cấu hình GITHUB_TOKEN trong Streamlit Secrets nên chưa thể tự động đẩy lên GitHub.")
+                st.error("Lỗi khi lưu lên GitHub. Vui lòng kiểm tra lại GITHUB_TOKEN trong Secrets.")
 
-    with tab_xem:
-        st.markdown("#### 📋 TOÀN BỘ KEY ĐANG LƯU TRÊN GITHUB")
-        df_history, _ = doc_du_lieu_github()
-        if not df_history.empty:
-            # Phân loại trạng thái còn hạn / hết hạn
-            hom_nay = datetime.now().date()
-            trang_thai = []
-            for h in df_history["Hạn sử dụng"]:
-                try:
-                    d_exp = datetime.strptime(str(h), "%d/%m/%Y").date()
-                    trang_thai.append("🟢 Còn hạn" if d_exp >= hom_nay else "🔴 Hết hạn")
-                except:
-                    trang_thai.append("Không xác định")
-            df_history["Trạng thái"] = trang_thai
-
-            st.dataframe(df_history, use_container_width=True, hide_index=True)
-            csv_down = df_history.to_csv(index=False, encoding="utf-8-sig")
-            st.download_button("📥 Tải file CSV", csv_down, "danh_sach_key.csv", "text/csv")
+    # TAB 2: QUẢN LÝ - GIA HẠN - HỦY
+    with tab_ql:
+        if not db_licenses:
+            st.info("Chưa có mã bản quyền nào trên GitHub.")
         else:
-            st.info("Chưa có dữ liệu key nào được ghi nhận trên GitHub.")
+            for k, v in list(db_licenses.items()):
+                ten_hien_thi = v.get("client_name", k)
+                with st.expander(f"Khách hàng: {ten_hien_thi} | Key: {k}", expanded=True):
+                    col_info, col_han, col_action = st.columns([2, 2, 2])
+                    
+                    with col_info:
+                        st.write(f"**Mã Key:** `{k}`")
+                        st.write(f"Trạng thái: {'🟢 Đang hoạt động' if v['status'] == 'active' else '🔴 ĐÃ BỊ KHÓA'}")
+                        st.write(f"Hạn hiện tại: **{datetime.strptime(v['expiry'], '%Y-%m-%d').strftime('%d/%m/%Y')}**")
+                        
+                    with col_han:
+                        cur_date = datetime.strptime(v['expiry'], "%Y-%m-%d").date()
+                        new_date = st.date_input("Chọn hạn mới:", value=cur_date, key=f"date_{k}")
+                        if st.button("Cập nhật hạn", key=f"btn_date_{k}"):
+                            db_licenses[k]["expiry"] = new_date.strftime("%Y-%m-%d")
+                            if update_remote_licenses(db_licenses, file_sha):
+                                st.success("Đã gia hạn thành công!")
+                                st.rerun()
+                            else:
+                                st.error("Lỗi khi cập nhật lên GitHub!")
+                                
+                    with col_action:
+                        st.write("Thao tác:")
+                        if v['status'] == "active":
+                            if st.button("🚫 Hủy / Khóa Key", key=f"block_{k}", type="secondary"):
+                                db_licenses[k]["status"] = "blocked"
+                                update_remote_licenses(db_licenses, file_sha)
+                                st.warning("Đã khóa bản quyền của khách!")
+                                st.rerun()
+                        else:
+                            if st.button("✅ Mở khóa lại", key=f"unblock_{k}"):
+                                db_licenses[k]["status"] = "active"
+                                update_remote_licenses(db_licenses, file_sha)
+                                st.success("Đã mở khóa lại!")
+                                st.rerun()
 
     st.divider()
     if st.button("Thoát chế độ Admin"):
@@ -188,7 +186,32 @@ if st.session_state.is_admin:
 # 1. NẠP DỮ LIỆU TỪ SHEET T4.2026 (ĐƠN GIÁ LÀM TRÒN SỐ NGUYÊN)
 # =========================================================================
 st.subheader("1. DANH MỤC HÀNG HÓA")
-file_upload = st.file_uploader("Kéo thả file số liệu vào đây:", type=["xlsx"])
+
+# Tạo file Excel mẫu chuẩn
+df_mau = pd.DataFrame({
+    "Mã VTHH (*)": ["SP01", "SP02", "SP03"],
+    "Tên VTHH (*)": ["Sản phẩm mẫu A", "Sản phẩm mẫu B", "Sản phẩm mẫu C"],
+    "ĐVT chính": ["Cái", "Hộp", "Gói"],
+    "Giá bán cố định": [50000, 120000, 25000],
+    "Tồn gốc (ẩn)": [100, 50, 200]
+})
+buffer_mau = io.BytesIO()
+with pd.ExcelWriter(buffer_mau, engine="openpyxl") as writer:
+    df_mau.to_excel(writer, sheet_name="T4.2026", index=False)
+
+col_up, col_btn = st.columns([3, 1])
+with col_up:
+    file_upload = st.file_uploader("Kéo thả file số liệu vào đây:", type=["xlsx"])
+with col_btn:
+    st.write("")
+    st.write("")
+    st.download_button(
+        label="📥 Tải file mẫu Excel",
+        data=buffer_mau.getvalue(),
+        file_name="MAU_PHAN_BO_BAN_HANG.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        help="Tải file mẫu Excel có sẵn các cột chuẩn để nhập liệu"
+    )
 
 if file_upload is not None:
     try:
@@ -202,7 +225,7 @@ if file_upload is not None:
             "TÊN VTHH": df_source["Tên VTHH (*)"],
             "ĐVT": df_source["ĐVT chính"],
             "ĐƠN GIÁ": pd.to_numeric(df_source["Giá bán cố định"], errors="coerce").fillna(0).round(0).astype(int),
-            "TỒN ĐẦU": pd.to_numeric(df_source["Tồn gốc (ẩn)"], errors="coerce").fillna(0).astype(int)
+            "TỒN ĐẦU": pd.to_numeric(df_source["Tồn gốc (ẩn)"], errors="coerce").fillna(0).round(0).astype(int)
         })
         st.success(f"Đã nạp chính xác {len(df_init)} mặt hàng từ sheet '{sheet_target}'.")
     except Exception as e:
@@ -271,12 +294,11 @@ if btn_run:
     ton_arr = df_items["TỒN ĐẦU"].values
     gia_arr = df_items["ĐƠN GIÁ"].values
 
-# --- TÍNH BU: LẤY ĐA DẠNG HÀNG HÓA KHI SỐ TIỀN NHỎ ---
+    # --- TÍNH BU: LẤY ĐA DẠNG HÀNG HÓA KHI SỐ TIỀN NHỎ ---
     tong_gia_tri_ton = np.sum(ton_arr * gia_arr)
     bu_arr = np.zeros(n, dtype=int)
     tien_hien_tai = 0.0
 
-    # 1. Quét lấy trước mỗi món 1 đơn vị (ưu tiên món rẻ tiền để phủ tối đa chủng loại)
     idx_sorted_by_price = np.argsort(gia_arr)
     for i in idx_sorted_by_price:
         if gia_arr[i] > 0 and ton_arr[i] > 0:
@@ -284,7 +306,6 @@ if btn_run:
                 bu_arr[i] = 1
                 tien_hien_tai += gia_arr[i]
 
-    # 2. Tiền còn dư sẽ chia theo tỷ lệ tồn kho còn lại
     tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
     ton_con_lai = ton_arr - bu_arr
     tong_ton_con_lai_vnd = np.sum(ton_con_lai * gia_arr)
@@ -296,7 +317,6 @@ if btn_run:
         bu_arr += sl_them
         tien_hien_tai = np.sum(bu_arr * gia_arr)
 
-    # 3. Bù các cây cuối cùng để khớp 100% doanh thu mục tiêu
     tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
     if tien_con_lai > 0:
         for i in range(n):
@@ -314,15 +334,13 @@ if btn_run:
     df_items["THÀNH TIỀN"] = bu_arr * gia_arr
     df_items["TỒN CUỐI"] = ton_arr - bu_arr
 
-    # --- Bước 3.2: Tối ưu phân bổ 2 chiều (Knapsack Greedy) ---
-    # 1. Xác định doanh thu mục tiêu từng ngày (kiểm soát bởi biến độ)
+    # 1. Xác định doanh thu mục tiêu từng ngày
     avg_day = tong_tien_muc_tieu / so_ngay_int
     day_targets = np.zeros(so_ngay_int, dtype=float)
     for d in range(so_ngay_int):
         wave = np.sin((d + 1) * 2 * np.pi / so_ngay_int) if so_ngay_int > 1 else 0
         day_targets[d] = avg_day * (1.0 + bien_do * wave)
     
-    # Chuẩn hóa để tổng mục tiêu đúng 100% doanh thu tháng
     day_targets = day_targets * (tong_tien_muc_tieu / np.sum(day_targets))
 
     # 2. Khởi tạo ma trận phân bổ (Món x Ngày)
@@ -330,7 +348,6 @@ if btn_run:
     day_actual_rev = np.zeros(so_ngay_int, dtype=float)
     bu_rem = bu_arr.copy()
 
-    # Bước A: Chia sàn phần nguyên cơ bản cho các ngày
     for i in range(n):
         base_qty = bu_rem[i] // so_ngay_int
         if base_qty > 0:
@@ -338,20 +355,17 @@ if btn_run:
             day_actual_rev += base_qty * gia_arr[i]
             bu_rem[i] -= base_qty * so_ngay_int
 
-    # Bước B: Quét 2 chiều khớp các cây lẻ vào ngày đang thiếu tiền nhiều nhất
-    # Ưu tiên món đơn giá cao xếp trước, món đơn giá thấp tinh chỉnh sau
     sort_order = np.argsort(-gia_arr)
     for i in sort_order:
         while bu_rem[i] > 0:
             deficit = day_targets - day_actual_rev
-            best_day = np.argmax(deficit)  # Ngày đang hụt tiền nhiều nhất
+            best_day = np.argmax(deficit)
             matrix_ngay[i, best_day] += 1
             day_actual_rev[best_day] += gia_arr[i]
             bu_rem[i] -= 1
 
     df_daily = pd.DataFrame(matrix_ngay, columns=danh_sach_ngay)
 
-    # ĐƯA CÁC CỘT NGÀY VÀO GIỮA, CÁC CỘT TỔNG HỢP CHO RA SAU CÙNG
     df_ket_qua_chi_tiet = pd.concat([
         df_items[["MÃ VTHH", "TÊN VTHH", "ĐVT", "ĐƠN GIÁ", "TỒN ĐẦU"]],
         df_daily,
@@ -367,20 +381,16 @@ if btn_run:
     tong_tien_thuc_te = int(np.sum(df_items["THÀNH TIỀN"]))
     chenh_lech = tong_tien_thuc_te - int(tong_tien_muc_tieu)
 
-    # 3 thẻ chỉ số tổng quan trên cùng
     m1, m2, m3 = st.columns(3)
     m1.metric("DOANH THU MỤC TIÊU", f"{tong_tien_muc_tieu:,.0f} đ")
     m2.metric("ĐÃ PHÂN BỔ THỰC TẾ", f"{tong_tien_thuc_te:,.0f} đ")
     m3.metric("CHÊNH LỆCH", f"{chenh_lech:,.0f} đ")
 
-    # -------------------------------------------------------------------------
-    # BẢNG 1: DOANH THU TỪNG NGÀY (HIỆN NGAY TRÊN ĐẦU, ĐẬP VÀO MẮT KHÔNG CẦN CUỘN)
-    # -------------------------------------------------------------------------
     st.markdown("#### 💰 TỔNG CỘNG DOANH THU VÀ CHỈ TIÊU TỪNG NGÀY")
     
-    doanh_thu_tung_ngay = np.dot(gia_arr, matrix_ngay)  # Tổng tiền từng ngày
-    tong_sl_tung_ngay = np.sum(matrix_ngay, axis=0)     # Tổng sản lượng từng ngày
-    so_mon_tung_ngay = np.sum(matrix_ngay > 0, axis=0)  # Số món bán từng ngày
+    doanh_thu_tung_ngay = np.dot(gia_arr, matrix_ngay)
+    tong_sl_tung_ngay = np.sum(matrix_ngay, axis=0)
+    so_mon_tung_ngay = np.sum(matrix_ngay > 0, axis=0)
 
     df_tong_hop_ngay = pd.DataFrame({
         "CHỈ TIÊU": [
@@ -403,9 +413,6 @@ if btn_run:
 
     st.dataframe(df_tong_hop_ngay, use_container_width=True, hide_index=True)
 
-    # -------------------------------------------------------------------------
-    # BẢNG 2: CHI TIẾT SẢN LƯỢNG BÁN CÁC NGÀY (CÁC CỘT TỔNG HỢP Ở SAU CÙNG)
-    # -------------------------------------------------------------------------
     st.markdown("#### 📋 CHI TIẾT SẢN LƯỢNG BÁN THEO MẶT HÀNG")
     st.dataframe(
         df_ket_qua_chi_tiet,
@@ -416,7 +423,7 @@ if btn_run:
             "THÀNH TIỀN": st.column_config.NumberColumn("THÀNH TIỀN", format="%,d")
         }
     )
-    # Xuất file Excel chuẩn hóa
+
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_ket_qua_chi_tiet.to_excel(writer, sheet_name="SL_BAN_THEO_NGAY", index=False)
@@ -427,7 +434,6 @@ if btn_run:
         row_sl_idx = last_row + 1
         row_tien_idx = last_row + 2
 
-        # Dòng 1: Tổng số lượng
         ws.cell(row_sl_idx, 1, "TỔNG CỘNG")
         ws.cell(row_sl_idx, 2, "Tổng số lượng bán")
         ws.cell(row_sl_idx, 5, int(np.sum(ton_arr)))
@@ -437,14 +443,12 @@ if btn_run:
         ws.cell(row_sl_idx, 7 + so_ngay_int, int(tong_tien_thuc_te))
         ws.cell(row_sl_idx, 8 + so_ngay_int, int(np.sum(ton_arr - bu_arr)))
 
-        # Dòng 2: Tổng doanh thu từng ngày
         ws.cell(row_tien_idx, 1, "DOANH THU")
         ws.cell(row_tien_idx, 2, "Tổng tiền bán ngày")
         for idx in range(so_ngay_int):
             ws.cell(row_tien_idx, 6 + idx, int(doanh_thu_tung_ngay[idx]))
         ws.cell(row_tien_idx, 7 + so_ngay_int, int(tong_tien_thuc_te))
 
-        # Định dạng Header và Dòng Tổng
         header_font = Font(name="Arial", size=11, bold=True, color="000000")
         header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
