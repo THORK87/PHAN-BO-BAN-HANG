@@ -135,7 +135,7 @@ if st.session_state.is_admin:
             else:
                 st.error("Lỗi khi lưu lên GitHub. Vui lòng kiểm tra lại GITHUB_TOKEN trong Secrets.")
 
-    # TAB 2: QUẢN LÝ - GIA HẠN - HỦY
+    # TAB 2: QUẢN LÝ - GIA HẠN - HỦY - XÓA
     with tab_ql:
         if not db_licenses:
             st.info("Chưa có mã bản quyền nào trên GitHub.")
@@ -143,12 +143,14 @@ if st.session_state.is_admin:
             for k, v in list(db_licenses.items()):
                 ten_hien_thi = v.get("client_name", k)
                 with st.expander(f"Khách hàng: {ten_hien_thi} | Key: {k}", expanded=True):
-                    col_info, col_han, col_action = st.columns([2, 2, 2])
+                    col_info, col_han, col_action = st.columns([2.5, 2, 2])
                     
                     with col_info:
-                        st.write(f"**Mã Key:** `{k}`")
-                        st.write(f"Trạng thái: {'🟢 Đang hoạt động' if v['status'] == 'active' else '🔴 ĐÃ BỊ KHÓA'}")
-                        st.write(f"Hạn hiện tại: **{datetime.strptime(v['expiry'], '%Y-%m-%d').strftime('%d/%m/%Y')}**")
+                        st.write(f"**Khách hàng:** `{ten_hien_thi}`")
+                        # Hộp code có sẵn nút Copy nhỏ ở góc phải
+                        st.code(k, language="text")
+                        st.write(f"Trạng thái: {'🟢 Hoạt động' if v['status'] == 'active' else '🔴 ĐÃ KHÓA'}")
+                        st.write(f"Hạn: **{datetime.strptime(v['expiry'], '%Y-%m-%d').strftime('%d/%m/%Y')}**")
                         
                     with col_han:
                         cur_date = datetime.strptime(v['expiry'], "%Y-%m-%d").date()
@@ -162,26 +164,30 @@ if st.session_state.is_admin:
                                 st.error("Lỗi khi cập nhật lên GitHub!")
                                 
                     with col_action:
-                        st.write("Thao tác:")
+                        st.write("Thao tác bản quyền:")
+                        # Nút Khóa / Mở khóa
                         if v['status'] == "active":
-                            if st.button("🚫 Hủy / Khóa Key", key=f"block_{k}", type="secondary"):
+                            if st.button("🚫 Khóa Key", key=f"block_{k}", type="secondary"):
                                 db_licenses[k]["status"] = "blocked"
                                 update_remote_licenses(db_licenses, file_sha)
-                                st.warning("Đã khóa bản quyền của khách!")
+                                st.warning("Đã khóa bản quyền!")
                                 st.rerun()
                         else:
-                            if st.button("✅ Mở khóa lại", key=f"unblock_{k}"):
+                            if st.button("✅ Mở khóa", key=f"unblock_{k}"):
                                 db_licenses[k]["status"] = "active"
                                 update_remote_licenses(db_licenses, file_sha)
                                 st.success("Đã mở khóa lại!")
                                 st.rerun()
-
-    st.divider()
-    if st.button("Thoát chế độ Admin"):
-        st.session_state.is_admin = False
-        st.rerun()
-    st.stop()
-
+                        
+                        st.write("")
+                        # Nút Xóa key hoàn toàn khỏi GitHub Database
+                        if st.button("🗑️ Xóa vĩnh viễn", key=f"del_{k}", type="primary"):
+                            del db_licenses[k]
+                            if update_remote_licenses(db_licenses, file_sha):
+                                st.success(f"Đã xóa vĩnh viễn key `{k}`!")
+                                st.rerun()
+                            else:
+                                st.error("Lỗi khi xóa key trên GitHub!")
 # =========================================================================
 # 1. NẠP DỮ LIỆU TỪ SHEET T4.2026 (ĐƠN GIÁ LÀM TRÒN SỐ NGUYÊN)
 # =========================================================================
