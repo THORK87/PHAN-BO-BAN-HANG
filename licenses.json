@@ -18,5 +18,10 @@
         "client_name": "THORK",
         "expiry": "2027-01-01",
         "status": "active"
+    },
+    "THORK-7ED0BC": {
+        "client_name": "THORK",
+        "expiry": "2027-01-01",
+        "status": "active"
     }
 }
