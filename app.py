@@ -107,24 +107,26 @@ if st.session_state.is_admin:
     
     tab_tao, tab_ql = st.tabs(["➕ Tạo Key Mới (Không ngày tháng)", "📋 Danh Sách & Gia Hạn / Hủy"])
 
-    # TAB 1: TẠO KEY MỚI
+   # TAB 1: TẠO KEY MỚI CHUẨN QUỐC TẾ (4 CỤM ĐỘC LẬP)
     with tab_tao:
         c1, c2 = st.columns(2)
         with c1:
-            ten_khach = st.text_input("Tên/Mã định danh khách:", value="CONGTY_ABC")
+            ten_khach = st.text_input("Ghi chú tên khách hàng (quản lý nội bộ):", value="CONGTY_ABC")
         with c2:
             ngay_het = st.date_input("Hạn sử dụng ban đầu:", value=date(2027, 1, 1))
             
-        if st.button("🚀 Tạo Key Cho Khách", type="primary"):
-            c_name = ten_khach.strip().upper().replace(" ", "")
-            # Sinh mã ngẫu nhiên 6 ký tự không chứa ngày tháng
-            random_code = secrets.token_hex(3).upper()
-            generated_key = f"{c_name}-{random_code}"
+        if st.button("🚀 Tạo License Key Quốc Tế", type="primary"):
+            c_name = ten_khach.strip() if ten_khach.strip() else "KHACH_HANG"
+            
+            # Tạo 4 cụm ngẫu nhiên: XXXX-XXXX-XXXX-XXXX
+            parts = [secrets.token_hex(2).upper() for _ in range(4)]
+            generated_key = "-".join(parts)
             
             db_licenses[generated_key] = {
                 "client_name": c_name,
                 "expiry": ngay_het.strftime("%Y-%m-%d"),
                 "status": "active"
+            }
             }
             
             if update_remote_licenses(db_licenses, file_sha):
