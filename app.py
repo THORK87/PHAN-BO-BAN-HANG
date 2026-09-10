@@ -1,3 +1,5 @@
+import base64
+import requests
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -68,40 +70,119 @@ if not st.session_state.is_licensed and not st.session_state.is_admin:
     st.warning("⚠️ Vui lòng nhập License Key ở thanh menu bên trái để mở khóa phần mềm.")
     st.stop()
 
-# GIAO DIỆN TẠO KEY (CHỈ HIỆN KHI BẠN NHẬP MÃ ADMIN)
+# =========================================================================
+# GIAO DIỆN TẠO & ĐỒNG BỘ KEY TRỰC TIẾP LÊN GITHUB (ADMIN)
+# =========================================================================
 if st.session_state.is_admin:
-    st.title("🔑 BẢNG TẠO LICENSE KEY (ADMIN)")
-    st.info("Chế độ quản trị viên đang bật. Bạn tạo mã xong thì copy gửi cho khách.")
-    
-    c_admin1, c_admin2 = st.columns(2)
-    with c_admin1:
-        ten_khach = st.text_input("Tên khách hàng (viết liền không dấu):", value="CONGTY_ABC")
-    with c_admin2:
-        ngay_het_han = st.date_input("Hạn sử dụng đến ngày:", value=date(2026, 12, 31))
+    st.title("🔑 QUẢN TRỊ VIÊN - QUẢN LÝ LICENSE KEY (ĐỒNG BỘ GITHUB)")
+    st.info("Dữ liệu cấp key sẽ được commit trực tiếp vào kho lưu trữ GitHub để lưu vĩnh viễn.")
+
+    tab_tao, tab_xem = st.tabs(["➕ Tạo Key Mới", "📋 Danh Sách Key Đã Cấp"])
+
+    FILE_PATH = "licenses_history.csv"
+
+    # Lấy thông tin kết nối từ Streamlit Secrets
+    gh_token = st.secrets.get("GITHUB_TOKEN", None)
+    gh_repo = st.secrets.get("GITHUB_REPO", None)
+    gh_branch = st.secrets.get("GITHUB_BRANCH", "main")
+
+    def doc_du_lieu_github():
+        """Hàm đọc file csv từ GitHub"""
+        if not gh_token or not gh_repo:
+            return pd.DataFrame(columns=["Khách hàng", "Ngày cấp", "Hạn sử dụng", "Mã License"]), None
+        url = f"https://api.github.com/repos/{gh_repo}/contents/{FILE_PATH}?ref={gh_branch}"
+        headers = {"Authorization": f"token {gh_token}"}
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            data = res.json()
+            sha = data["sha"]
+            content = base64.b64decode(data["content"]).decode("utf-8-sig")
+            df = pd.read_csv(io.StringIO(content))
+            return df, sha
+        return pd.DataFrame(columns=["Khách hàng", "Ngày cấp", "Hạn sử dụng", "Mã License"]), None
+
+    def ghi_du_lieu_github(df_moi, sha=None):
+        """Hàm commit file csv đè lên GitHub"""
+        url = f"https://api.github.com/repos/{gh_repo}/contents/{FILE_PATH}"
+        headers = {
+            "Authorization": f"token {gh_token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        csv_str = df_moi.to_csv(index=False, encoding="utf-8-sig")
+        content_b64 = base64.b64encode(csv_str.encode("utf-8-sig")).decode("utf-8")
         
-    if st.button("🚀 BẤM ĐỂ TẠO KEY", type="primary"):
-        client = ten_khach.strip().upper().replace(" ", "")
-        exp_str = ngay_het_han.strftime("%Y%m%d")
-        payload = f"{client}|{exp_str}"
-        sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()[:8].upper()
+        payload = {
+            "message": f"Cập nhật License Key - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            "content": content_b64,
+            "branch": gh_branch
+        }
+        if sha:
+            payload["sha"] = sha
         
-        license_tao = f"{client}-{exp_str}-{sig[:4]}-{sig[4:8]}"
-        st.success(f"Mã của khách **{client}** (Hạn: {ngay_het_han.strftime('%d/%m/%Y')}):")
-        st.code(license_tao, language="text")
-        
+        res = requests.put(url, headers=headers, json=payload)
+        return res.status_code in [200, 201]
+
+    with tab_tao:
+        c_admin1, c_admin2 = st.columns(2)
+        with c_admin1:
+            ten_khach = st.text_input("Tên khách hàng (viết liền không dấu):", value="CONGTY_ABC")
+        with c_admin2:
+            ngay_het_han = st.date_input("Hạn sử dụng đến ngày:", value=date(2026, 12, 31))
+            
+        if st.button("🚀 BẤM ĐỂ TẠO & LƯU LÊN GITHUB", type="primary"):
+            client = ten_khach.strip().upper().replace(" ", "")
+            exp_str = ngay_het_han.strftime("%Y%m%d")
+            payload_sign = f"{client}|{exp_str}"
+            sig = hmac.new(SECRET_KEY.encode(), payload_sign.encode(), hashlib.sha256).hexdigest()[:8].upper()
+            
+            license_tao = f"{client}-{exp_str}-{sig[:4]}-{sig[4:8]}"
+            st.success(f"Mã của khách **{client}** (Hạn: {ngay_het_han.strftime('%d/%m/%Y')}):")
+            st.code(license_tao, language="text")
+
+            # Đọc file hiện tại từ GitHub, thêm dòng mới và ghi lại
+            if gh_token and gh_repo:
+                df_cu, sha = doc_du_lieu_github()
+                dong_moi = pd.DataFrame([{
+                    "Khách hàng": client,
+                    "Ngày cấp": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                    "Hạn sử dụng": ngay_het_han.strftime("%d/%m/%Y"),
+                    "Mã License": license_tao
+                }])
+                df_tong = pd.concat([df_cu, dong_moi], ignore_index=True).drop_duplicates(subset=["Mã License"])
+                
+                if ghi_du_lieu_github(df_tong, sha):
+                    st.toast("✅ Đã commit lưu trữ vĩnh viễn lên GitHub!")
+                else:
+                    st.error("Không thể ghi file lên GitHub. Vui lòng kiểm tra lại Token hoặc quyền repo.")
+            else:
+                st.warning("Chưa cấu hình GITHUB_TOKEN trong Streamlit Secrets nên chưa thể tự động đẩy lên GitHub.")
+
+    with tab_xem:
+        st.markdown("#### 📋 TOÀN BỘ KEY ĐANG LƯU TRÊN GITHUB")
+        df_history, _ = doc_du_lieu_github()
+        if not df_history.empty:
+            # Phân loại trạng thái còn hạn / hết hạn
+            hom_nay = datetime.now().date()
+            trang_thai = []
+            for h in df_history["Hạn sử dụng"]:
+                try:
+                    d_exp = datetime.strptime(str(h), "%d/%m/%Y").date()
+                    trang_thai.append("🟢 Còn hạn" if d_exp >= hom_nay else "🔴 Hết hạn")
+                except:
+                    trang_thai.append("Không xác định")
+            df_history["Trạng thái"] = trang_thai
+
+            st.dataframe(df_history, use_container_width=True, hide_index=True)
+            csv_down = df_history.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button("📥 Tải file CSV", csv_down, "danh_sach_key.csv", "text/csv")
+        else:
+            st.info("Chưa có dữ liệu key nào được ghi nhận trên GitHub.")
+
+    st.divider()
     if st.button("Thoát chế độ Admin"):
         st.session_state.is_admin = False
         st.rerun()
     st.stop()
-
-st.title("HỆ THỐNG PHÂN BỔ BÁN HÀNG THEO NGÀY")
-
-# Hàm làm tròn chuẩn Excel (Half Up: >= 0.5 làm tròn lên)
-def round_excel(val):
-    if val >= 0:
-        return math.floor(val + 0.5)
-    else:
-        return math.ceil(val - 0.5)
 
 # =========================================================================
 # 1. NẠP DỮ LIỆU TỪ SHEET T4.2026 (ĐƠN GIÁ LÀM TRÒN SỐ NGUYÊN)
