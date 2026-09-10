@@ -190,28 +190,45 @@ if btn_run:
     ton_arr = df_items["TỒN ĐẦU"].values
     gia_arr = df_items["ĐƠN GIÁ"].values
 
-    # --- Bước 3.1: Tính BS, BT, BU theo chuẩn Excel ---
+# --- TÍNH BU: LẤY ĐA DẠNG HÀNG HÓA KHI SỐ TIỀN NHỎ ---
     tong_gia_tri_ton = np.sum(ton_arr * gia_arr)
-    ti_le_chung = min(1.0, tong_tien_muc_tieu / tong_gia_tri_ton) if tong_gia_tri_ton > 0 else 0
+    bu_arr = np.zeros(n, dtype=int)
+    tien_hien_tai = 0.0
 
-    # BS: ROUNDDOWN(BQ * ti_le, 0)
-    bs_arr = np.floor(ton_arr * ti_le_chung)
+    # 1. Quét lấy trước mỗi món 1 đơn vị (ưu tiên món rẻ tiền để phủ tối đa chủng loại)
+    idx_sorted_by_price = np.argsort(gia_arr)
+    for i in idx_sorted_by_price:
+        if gia_arr[i] > 0 and ton_arr[i] > 0:
+            if tien_hien_tai + gia_arr[i] <= tong_tien_muc_tieu:
+                bu_arr[i] = 1
+                tien_hien_tai += gia_arr[i]
 
-    # BT: Công thức lũy kế bù trừ
-    bt_arr = np.zeros(n)
-    sumprod_bs = np.sum(bs_arr * gia_arr)
-    tien_bt_cum = 0.0
+    # 2. Tiền còn dư sẽ chia theo tỷ lệ tồn kho còn lại
+    tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
+    ton_con_lai = ton_arr - bu_arr
+    tong_ton_con_lai_vnd = np.sum(ton_con_lai * gia_arr)
 
-    for i in range(n):
-        if gia_arr[i] > 0:
-            con_lai = tong_tien_muc_tieu - sumprod_bs - tien_bt_cum
-            sl_bu_du_kien = np.floor(con_lai / gia_arr[i]) if con_lai > 0 else 0
-            sl_bu = min(ton_arr[i] - bs_arr[i], max(0, sl_bu_du_kien))
-            bt_arr[i] = sl_bu
-            tien_bt_cum += sl_bu * gia_arr[i]
+    if tien_con_lai > 0 and tong_ton_con_lai_vnd > 0:
+        ti_le_phu = min(1.0, tien_con_lai / tong_ton_con_lai_vnd)
+        sl_them = np.floor(ton_con_lai * ti_le_phu).astype(int)
+        sl_them = np.minimum(sl_them, ton_con_lai)
+        bu_arr += sl_them
+        tien_hien_tai = np.sum(bu_arr * gia_arr)
 
-    # BU = BS + BT
-    bu_arr = (bs_arr + bt_arr).astype(int)
+    # 3. Bù các cây cuối cùng để khớp 100% doanh thu mục tiêu
+    tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
+    if tien_con_lai > 0:
+        for i in range(n):
+            if gia_arr[i] > 0 and bu_arr[i] < ton_arr[i]:
+                sl_bu_max = ton_arr[i] - bu_arr[i]
+                sl_can_bu = int(tien_con_lai // gia_arr[i])
+                sl_thuc_bu = min(sl_bu_max, sl_can_bu)
+                if sl_thuc_bu > 0:
+                    bu_arr[i] += sl_thuc_bu
+                    tien_con_lai -= sl_thuc_bu * gia_arr[i]
+                    if tien_con_lai < np.min(gia_arr[gia_arr > 0]):
+                        break
+
     df_items["TỔNG SL BÁN"] = bu_arr
     df_items["THÀNH TIỀN"] = bu_arr * gia_arr
     df_items["TỒN CUỐI"] = ton_arr - bu_arr
