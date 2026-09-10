@@ -164,7 +164,7 @@ c1, c2, c3 = st.columns(3)
 with c1:
     so_ngay = st.number_input("SỐ NGÀY BÁN (Nhập số nguyên):", min_value=1, max_value=31, value=5, step=1)
 with c2:
-    bien_do = st.number_input("ĐỘ LỆCH DOANH THU CÁC NGÀY (mặc định 0.3):", min_value=0.3, max_value=3.0, value=0.3, step=0.1, format="%.3f")
+    bien_do = st.number_input("ĐỘ LỆCH DOANH THU CÁC NGÀY (0.0 = san phẳng tuyệt đối):", min_value=0.0, max_value=3.0, value=0.0, step=0.05, format="%.2f")
 with c3:
     tong_tien_muc_tieu = st.number_input("DOANH THU TỔNG (VNĐ):", min_value=0.0, value=10000000.0, step=500000.0, format="%.0f")
     st.caption(f"👉 Số tiền: **{int(tong_tien_muc_tieu):,} đ**")
@@ -172,7 +172,7 @@ with c3:
 btn_run = st.button("🚀 CHẠY PHÂN BỔ ", type="primary")
 
 # =========================================================================
-# 3. THUẬT TOÁN TÁI TẠO NGUYÊN BẢN CÔNG THỨC EXCEL
+# 3. THUẬT TOÁN TỐI ƯU 2 CHIỀU (KNAPSACK GREEDY)
 # =========================================================================
 if btn_run:
     df_items = edited_df.dropna(subset=["MÃ VTHH"]).copy().reset_index(drop=True)
@@ -190,14 +190,14 @@ if btn_run:
     ton_arr = df_items["TỒN ĐẦU"].values
     gia_arr = df_items["ĐƠN GIÁ"].values
 
-    # --- Bước 3.1: Tính BS, BT, BU theo đúng công thức Excel ---
+    # --- Bước 3.1: Tính BS, BT, BU theo chuẩn Excel ---
     tong_gia_tri_ton = np.sum(ton_arr * gia_arr)
     ti_le_chung = min(1.0, tong_tien_muc_tieu / tong_gia_tri_ton) if tong_gia_tri_ton > 0 else 0
 
     # BS: ROUNDDOWN(BQ * ti_le, 0)
     bs_arr = np.floor(ton_arr * ti_le_chung)
 
-    # BT: Công thức lũy kế chính xác trong Excel
+    # BT: Công thức lũy kế bù trừ
     bt_arr = np.zeros(n)
     sumprod_bs = np.sum(bs_arr * gia_arr)
     tien_bt_cum = 0.0
@@ -216,38 +216,40 @@ if btn_run:
     df_items["THÀNH TIỀN"] = bu_arr * gia_arr
     df_items["TỒN CUỐI"] = ton_arr - bu_arr
 
-    # --- Bước 3.2: Tính ma trận số lượng từng ngày ---
+    # --- Bước 3.2: Tối ưu phân bổ 2 chiều (Knapsack Greedy) ---
+    # 1. Xác định doanh thu mục tiêu từng ngày (kiểm soát bởi biến độ)
+    avg_day = tong_tien_muc_tieu / so_ngay_int
+    day_targets = np.zeros(so_ngay_int, dtype=float)
+    for d in range(so_ngay_int):
+        wave = np.sin((d + 1) * 2 * np.pi / so_ngay_int) if so_ngay_int > 1 else 0
+        day_targets[d] = avg_day * (1.0 + bien_do * wave)
+    
+    # Chuẩn hóa để tổng mục tiêu đúng 100% doanh thu tháng
+    day_targets = day_targets * (tong_tien_muc_tieu / np.sum(day_targets))
+
+    # 2. Khởi tạo ma trận phân bổ (Món x Ngày)
     matrix_ngay = np.zeros((n, so_ngay_int), dtype=int)
+    day_actual_rev = np.zeros(so_ngay_int, dtype=float)
+    bu_rem = bu_arr.copy()
 
+    # Bước A: Chia sàn phần nguyên cơ bản cho các ngày
     for i in range(n):
-        bu_val = bu_arr[i]
-        if bu_val <= 0:
-            continue
+        base_qty = bu_rem[i] // so_ngay_int
+        if base_qty > 0:
+            matrix_ngay[i, :] += base_qty
+            day_actual_rev += base_qty * gia_arr[i]
+            bu_rem[i] -= base_qty * so_ngay_int
 
-        row_excel = i + 9
-        bv_val = (row_excel - 5) % 30
-
-        he_so = np.zeros(so_ngay_int)
-        for c_idx in range(so_ngay_int):
-            k = c_idx + 1
-            val_in = k * 12.9898 + tong_tien_muc_tieu * 0.0001
-            sin_val = math.sin(val_in)
-            hash_sin = (abs(sin_val) * 43758.5453) % 1.0
-            song_tuan = math.sin((bv_val + c_idx) * 2.0 * math.pi / 7.0)
-            
-            val = 1.0 + bien_do * (0.6 * (2.0 * hash_sin - 1.0) + 0.4 * song_tuan)
-            he_so[c_idx] = max(0.1, val)
-
-        sum_all = np.sum(he_so)
-        if sum_all == 0:
-            continue
-
-        cum_he_so = np.cumsum(he_so)
-        prev_round = 0
-        for d_idx, cum in enumerate(cum_he_so):
-            curr_round = round_excel(bu_val * cum / sum_all)
-            matrix_ngay[i, d_idx] = curr_round - prev_round
-            prev_round = curr_round
+    # Bước B: Quét 2 chiều khớp các cây lẻ vào ngày đang thiếu tiền nhiều nhất
+    # Ưu tiên món đơn giá cao xếp trước, món đơn giá thấp tinh chỉnh sau
+    sort_order = np.argsort(-gia_arr)
+    for i in sort_order:
+        while bu_rem[i] > 0:
+            deficit = day_targets - day_actual_rev
+            best_day = np.argmax(deficit)  # Ngày đang hụt tiền nhiều nhất
+            matrix_ngay[i, best_day] += 1
+            day_actual_rev[best_day] += gia_arr[i]
+            bu_rem[i] -= 1
 
     df_daily = pd.DataFrame(matrix_ngay, columns=danh_sach_ngay)
 
@@ -308,14 +310,14 @@ if btn_run:
     # -------------------------------------------------------------------------
     st.markdown("#### 📋 CHI TIẾT SẢN LƯỢNG BÁN THEO MẶT HÀNG")
     st.dataframe(
-    df_ket_qua_chi_tiet,
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "ĐƠN GIÁ": st.column_config.NumberColumn("ĐƠN GIÁ", format="%,d"),
-        "THÀNH TIỀN": st.column_config.NumberColumn("THÀNH TIỀN", format="%,d")
-    }
-)
+        df_ket_qua_chi_tiet,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "ĐƠN GIÁ": st.column_config.NumberColumn("ĐƠN GIÁ", format="%,d"),
+            "THÀNH TIỀN": st.column_config.NumberColumn("THÀNH TIỀN", format="%,d")
+        }
+    )
     # Xuất file Excel chuẩn hóa
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
