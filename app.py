@@ -284,9 +284,6 @@ btn_run = st.button("🚀 CHẠY PHÂN BỔ ", type="primary")
 # =========================================================================
 # 3. THUẬT TOÁN TỐI ƯU 2 CHIỀU (KNAPSACK GREEDY)
 # =========================================================================
-# =========================================================================
-# 3. THUẬT TOÁN TỐI ƯU 2 CHIỀU (KNAPSACK GREEDY)
-# =========================================================================
 if btn_run:
     df_items = edited_df.dropna(subset=["MÃ VTHH"]).copy().reset_index(drop=True)
     df_items["ĐƠN GIÁ"] = pd.to_numeric(df_items["ĐƠN GIÁ"], errors="coerce").fillna(0).round(0).astype(int)
@@ -343,7 +340,7 @@ if btn_run:
     df_items["THÀNH TIỀN"] = bu_arr * gia_arr
     df_items["TỒN CUỐI"] = ton_arr - bu_arr
 
-    # 1. Xác định doanh thu mục tiêu từng ngày
+   # 1. Xác định doanh thu mục tiêu từng ngày (theo bien_do)
     avg_day = tong_tien_muc_tieu / so_ngay_int
     day_targets = np.zeros(so_ngay_int, dtype=float)
     for d in range(so_ngay_int):
@@ -351,54 +348,34 @@ if btn_run:
         day_targets[d] = avg_day * (1.0 + bien_do * wave)
     
     day_targets = day_targets * (tong_tien_muc_tieu / np.sum(day_targets))
+    day_ratios = day_targets / np.sum(day_targets)  # Tỷ trọng mục tiêu từng ngày
 
-    # 2. Phân bổ ma trận 2 chiều (Rải đều cách nhật, không dồn cục)
+    # 2. Phân bổ ma trận đồng đều đa món (Mọi món cùng co dãn theo biên độ)
     matrix_ngay = np.zeros((n, so_ngay_int), dtype=int)
 
-    # Bước A: Rải đều số lượng từng món cách nhật ra các ngày
     for i in range(n):
         total_qty = bu_arr[i]
-        if total_qty > 0:
-            if total_qty >= so_ngay_int:
-                base = total_qty // so_ngay_int
-                matrix_ngay[i, :] += base
-                rem = total_qty % so_ngay_int
-                if rem > 0:
-                    indices = [int(round(k * (so_ngay_int - 1) / (rem - 1))) if rem > 1 else so_ngay_int // 2 for k in range(rem)]
-                    for d_idx in indices:
-                        matrix_ngay[i, d_idx] += 1
-            else:
-                indices = [int(round(k * (so_ngay_int - 1) / (total_qty - 1))) if total_qty > 1 else so_ngay_int // 2 for k in range(total_qty)]
-                for d_idx in indices:
-                    matrix_ngay[i, d_idx] += 1
-
-    # Bước B: Tinh chỉnh hoán vị để doanh thu các ngày bám sát biên độ (bien_do)
-    for _ in range(50):
-        current_rev = np.dot(gia_arr, matrix_ngay)
-        diff = day_targets - current_rev
-        d_rich = np.argmin(diff)
-        d_poor = np.argmax(diff)
-        
-        if diff[d_poor] <= 0 or diff[d_rich] >= 0:
-            break
+        if total_qty == 0:
+            continue
             
-        best_i = -1
-        best_err = abs(diff[d_rich]) + abs(diff[d_poor])
-        
-        for i in range(n):
-            if matrix_ngay[i, d_rich] > 0 and gia_arr[i] > 0:
-                p = gia_arr[i]
-                new_err = abs(diff[d_rich] + p) + abs(diff[d_poor] - p)
-                if new_err < best_err:
-                    best_err = new_err
-                    best_i = i
-                    
-        if best_i != -1:
-            matrix_ngay[best_i, d_rich] -= 1
-            matrix_ngay[best_i, d_poor] += 1
+        # Món số lượng ít (<= 3): Rải đều cách nhật để không mất món ở các ngày
+        if total_qty <= 3:
+            indices = [int(round(k * (so_ngay_int - 1) / (total_qty - 1))) if total_qty > 1 else so_ngay_int // 2 for k in range(total_qty)]
+            for d_idx in indices:
+                matrix_ngay[i, d_idx] += 1
         else:
-            break
-
+            # Món số lượng lớn: Co dãn theo tỷ trọng ngày để mọi món cùng gánh biên độ
+            raw_dist = total_qty * day_ratios
+            base_dist = np.floor(raw_dist).astype(int)
+            matrix_ngay[i, :] += base_dist
+            
+            # Phân phối phần dư lẻ vào ngày có phần thập phân cao nhất
+            rem = total_qty - np.sum(base_dist)
+            if rem > 0:
+                fractional_parts = raw_dist - base_dist
+                top_days = np.argsort(-fractional_parts)[:rem]
+                for d_idx in top_days:
+                    matrix_ngay[i, d_idx] += 1
     # Bước C: Tạo DataFrame kết quả hiển thị
     df_daily = pd.DataFrame(matrix_ngay, columns=danh_sach_ngay)
 
