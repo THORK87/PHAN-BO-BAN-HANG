@@ -349,34 +349,53 @@ if btn_run:
     
     day_targets = day_targets * (tong_tien_muc_tieu / np.sum(day_targets))
 
-    # 2. Khởi tạo ma trận phân bổ (Món x Ngày)
+# 2. Phân bổ ma trận 2 chiều (Rải đều cách nhật, không dồn cục)
     matrix_ngay = np.zeros((n, so_ngay_int), dtype=int)
-    day_actual_rev = np.zeros(so_ngay_int, dtype=float)
-    bu_rem = bu_arr.copy()
 
+    # Bước A: Rải đều số lượng từng món cách nhật ra các ngày
     for i in range(n):
-        base_qty = bu_rem[i] // so_ngay_int
-        if base_qty > 0:
-            matrix_ngay[i, :] += base_qty
-            day_actual_rev += base_qty * gia_arr[i]
-            bu_rem[i] -= base_qty * so_ngay_int
+        total_qty = bu_arr[i]
+        if total_qty > 0:
+            if total_qty >= so_ngay_int:
+                base = total_qty // so_ngay_int
+                matrix_ngay[i, :] += base
+                rem = total_qty % so_ngay_int
+                if rem > 0:
+                    indices = [int(round(k * (so_ngay_int - 1) / (rem - 1))) if rem > 1 else so_ngay_int // 2 for k in range(rem)]
+                    for d_idx in indices:
+                        matrix_ngay[i, d_idx] += 1
+            else:
+                # Nếu số lượng ít hơn số ngày (vd: 2, 3 cái / 5 ngày) -> rải cách quãng (Ngày 1, 3, 5...)
+                indices = [int(round(k * (so_ngay_int - 1) / (total_qty - 1))) if total_qty > 1 else so_ngay_int // 2 for k in range(total_qty)]
+                for d_idx in indices:
+                    matrix_ngay[i, d_idx] += 1
 
-    sort_order = np.argsort(-gia_arr)
-    for i in sort_order:
-        while bu_rem[i] > 0:
-            deficit = day_targets - day_actual_rev
-            best_day = np.argmax(deficit)
-            matrix_ngay[i, best_day] += 1
-            day_actual_rev[best_day] += gia_arr[i]
-            bu_rem[i] -= 1
-
-    df_daily = pd.DataFrame(matrix_ngay, columns=danh_sach_ngay)
-
-    df_ket_qua_chi_tiet = pd.concat([
-        df_items[["MÃ VTHH", "TÊN VTHH", "ĐVT", "ĐƠN GIÁ", "TỒN ĐẦU"]],
-        df_daily,
-        df_items[["TỔNG SL BÁN", "THÀNH TIỀN", "TỒN CUỐI"]]
-    ], axis=1)
+    # Bước B: Tinh chỉnh hoán vị để doanh thu các ngày bám sát biên độ (bien_do)
+    for _ in range(50):
+        current_rev = np.dot(gia_arr, matrix_ngay)
+        diff = day_targets - current_rev
+        d_rich = np.argmin(diff)   # Ngày đang thừa doanh thu nhiều nhất
+        d_poor = np.argmax(diff)   # Ngày đang thiếu doanh thu nhiều nhất
+        
+        if diff[d_poor] <= 0 or diff[d_rich] >= 0:
+            break
+            
+        best_i = -1
+        best_err = abs(diff[d_rich]) + abs(diff[d_poor])
+        
+        for i in range(n):
+            if matrix_ngay[i, d_rich] > 0 and gia_arr[i] > 0:
+                p = gia_arr[i]
+                new_err = abs(diff[d_rich] + p) + abs(diff[d_poor] - p)
+                if new_err < best_err:
+                    best_err = new_err
+                    best_i = i
+                    
+        if best_i != -1:
+            matrix_ngay[best_i, d_rich] -= 1
+            matrix_ngay[best_i, d_poor] += 1
+        else:
+            break
 
     # =========================================================================
     # 4. HIỂN THỊ KẾT QUẢ & XUẤT FILE EXCEL
