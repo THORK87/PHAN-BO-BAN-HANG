@@ -487,7 +487,7 @@ if btn_run:
             ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
     st.download_button(
-        label="📥 TẢI FILE EXCEL KẾT QUẢ (KHỚP CHUẨN FILE GỐC)",
+        label="TẢI FILE EXCEL KẾT QUẢ",
         data=output.getvalue(),
         file_name=f"PHAN_BO_{so_ngay_int}_NGAY.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
