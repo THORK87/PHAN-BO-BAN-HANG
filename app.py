@@ -284,6 +284,9 @@ btn_run = st.button("🚀 CHẠY PHÂN BỔ ", type="primary")
 # =========================================================================
 # 3. THUẬT TOÁN TỐI ƯU 2 CHIỀU (KNAPSACK GREEDY)
 # =========================================================================
+# =========================================================================
+# 3. THUẬT TOÁN TỐI ƯU 2 CHIỀU (KNAPSACK GREEDY)
+# =========================================================================
 if btn_run:
     df_items = edited_df.dropna(subset=["MÃ VTHH"]).copy().reset_index(drop=True)
     df_items["ĐƠN GIÁ"] = pd.to_numeric(df_items["ĐƠN GIÁ"], errors="coerce").fillna(0).round(0).astype(int)
@@ -349,7 +352,7 @@ if btn_run:
     
     day_targets = day_targets * (tong_tien_muc_tieu / np.sum(day_targets))
 
-# 2. Phân bổ ma trận 2 chiều (Rải đều cách nhật, không dồn cục)
+    # 2. Phân bổ ma trận 2 chiều (Rải đều cách nhật, không dồn cục)
     matrix_ngay = np.zeros((n, so_ngay_int), dtype=int)
 
     # Bước A: Rải đều số lượng từng món cách nhật ra các ngày
@@ -365,7 +368,6 @@ if btn_run:
                     for d_idx in indices:
                         matrix_ngay[i, d_idx] += 1
             else:
-                # Nếu số lượng ít hơn số ngày (vd: 2, 3 cái / 5 ngày) -> rải cách quãng (Ngày 1, 3, 5...)
                 indices = [int(round(k * (so_ngay_int - 1) / (total_qty - 1))) if total_qty > 1 else so_ngay_int // 2 for k in range(total_qty)]
                 for d_idx in indices:
                     matrix_ngay[i, d_idx] += 1
@@ -374,8 +376,8 @@ if btn_run:
     for _ in range(50):
         current_rev = np.dot(gia_arr, matrix_ngay)
         diff = day_targets - current_rev
-        d_rich = np.argmin(diff)   # Ngày đang thừa doanh thu nhiều nhất
-        d_poor = np.argmax(diff)   # Ngày đang thiếu doanh thu nhiều nhất
+        d_rich = np.argmin(diff)
+        d_poor = np.argmax(diff)
         
         if diff[d_poor] <= 0 or diff[d_rich] >= 0:
             break
@@ -396,6 +398,15 @@ if btn_run:
             matrix_ngay[best_i, d_poor] += 1
         else:
             break
+
+    # Bước C: Tạo DataFrame kết quả hiển thị
+    df_daily = pd.DataFrame(matrix_ngay, columns=danh_sach_ngay)
+
+    df_ket_qua_chi_tiet = pd.concat([
+        df_items[["MÃ VTHH", "TÊN VTHH", "ĐVT", "ĐƠN GIÁ", "TỒN ĐẦU"]],
+        df_daily,
+        df_items[["TỔNG SL BÁN", "THÀNH TIỀN", "TỒN CUỐI"]]
+    ], axis=1)
 
     # =========================================================================
     # 4. HIỂN THỊ KẾT QUẢ & XUẤT FILE EXCEL
