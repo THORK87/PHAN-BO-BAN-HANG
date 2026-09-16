@@ -11,7 +11,31 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Phân Bổ Bán Hàng Chuẩn Excel", layout="wide")
+import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 
+# 1. Chặn truy cập nếu chưa xác thực
+if "auth" not in st.session_state:
+    st.session_state.auth = False
+
+if not st.session_state.auth:
+    key_input = st.text_input("Nhập mã truy cập:", type="password")
+    if st.button("Xác thực"):
+        if key_input == "PASSKEY_HOP_LE":
+            st.session_state.auth = True
+            st.rerun()
+        else:
+            st.error("Mã không đúng.")
+    st.stop()  # Dừng chương trình tại đây, chưa tải dữ liệu
+
+# 2. CHỈ KHI QUA ĐƯỢC BƯỚC TRÊN MỚI BẮT ĐẦU TẢI DỮ LIỆU
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# Đọc file dữ liệu phân bổ lưu riêng từ Google Sheet bí mật
+df_phan_bo = conn.read(worksheet="DuLieuPhanBo", ttl=60)
+
+st.success("Tải dữ liệu phân bổ thành công!")
+st.dataframe(df_phan_bo)
 # =========================================================================
 # CẤU HÌNH GITHUB DATABASE BẢN QUYỀN
 # =========================================================================
