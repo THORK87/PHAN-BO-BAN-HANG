@@ -13,11 +13,12 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="Phân Bổ Bán Hàng Chuẩn Excel", layout="wide")
 
 # =========================================================================
-# CẤU HÌNH GITHUB DATABASE BẢN QUYỀN
+# CẤU HÌNH GITHUB DATABASE BẢN QUYỀN & NHẬT KÝ HOẠT ĐỘNG
 # =========================================================================
 GITHUB_REPO = st.secrets.get("GITHUB_REPO", "THORK87/PHAN-BO-BAN-HANG")
 GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
-FILE_PATH = "licenses.json"
+LICENSES_FILE = "licenses.json"
+ACTIVITY_LOG_FILE = "activity_log.json"
 ADMIN_KEY = "Duykhuong@2026"  # Mật khẩu quản trị của bạn
 
 # Lấy token từ Secrets của Streamlit Cloud
@@ -27,11 +28,17 @@ HEADERS = {
     "Authorization": f"token {GITHUB_TOKEN}",
     "Accept": "application/vnd.github.v3+json"
 }
-API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
+LICENSES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{LICENSES_FILE}"
+ACTIVITY_LOG_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{ACTIVITY_LOG_FILE}"
 
+import json
+
+# =========================================================================
+# HÀM QUẢN LÝ BẢN QUYỀN
+# =========================================================================
 def get_remote_licenses():
     try:
-        res = requests.get(f"{API_URL}?ref={GITHUB_BRANCH}", headers=HEADERS)
+        res = requests.get(f"{LICENSES_API_URL}?ref={GITHUB_BRANCH}", headers=HEADERS)
         if res.status_code == 200:
             data = res.json()
             content = base64.b64decode(data["content"]).decode("utf-8")
@@ -39,8 +46,6 @@ def get_remote_licenses():
     except Exception:
         pass
     return {}, None
-
-import json
 
 def update_remote_licenses(new_data, sha=None):
     try:
@@ -53,10 +58,67 @@ def update_remote_licenses(new_data, sha=None):
         }
         if sha:
             payload["sha"] = sha
-        res = requests.put(API_URL, headers=HEADERS, json=payload)
+        res = requests.put(LICENSES_API_URL, headers=HEADERS, json=payload)
         return res.status_code in [200, 201]
     except Exception:
         return False
+
+# =========================================================================
+# HÀM QUẢN LÝ NHẬT KÝ HOẠT ĐỘNG
+# =========================================================================
+def get_remote_activity_log():
+    """Tải nhật ký hoạt động từ GitHub"""
+    try:
+        res = requests.get(f"{ACTIVITY_LOG_API_URL}?ref={GITHUB_BRANCH}", headers=HEADERS)
+        if res.status_code == 200:
+            data = res.json()
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            return json.loads(content), data["sha"]
+    except Exception:
+        pass
+    return [], None
+
+def update_remote_activity_log(new_data, sha=None):
+    """Cập nhật nhật ký hoạt động lên GitHub"""
+    try:
+        content_str = json.dumps(new_data, ensure_ascii=False, indent=2)
+        content_b64 = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
+        payload = {
+            "message": f"Update activity log - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+            "content": content_b64,
+            "branch": GITHUB_BRANCH
+        }
+        if sha:
+            payload["sha"] = sha
+        res = requests.put(ACTIVITY_LOG_API_URL, headers=HEADERS, json=payload)
+        return res.status_code in [200, 201]
+    except Exception:
+        return False
+
+def log_activity(activity_type, details):
+    """
+    Ghi nhân hành động vào nhật ký
+    
+    activity_type: "LOGIN_SUCCESS", "LOGIN_FAILED", "ADMIN_LOGIN", "KEY_CREATED", "KEY_EXPIRED", "KEY_BLOCKED", etc.
+    details: dict chứa thông tin chi tiết
+    """
+    activity_log, log_sha = get_remote_activity_log()
+    
+    log_entry = {
+        "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        "type": activity_type,
+        "details": details
+    }
+    
+    activity_log.append(log_entry)
+    
+    # Giữ lại 500 log gần nhất (tránh file quá lớn)
+    if len(activity_log) > 500:
+        activity_log = activity_log[-500:]
+    
+    if update_remote_activity_log(activity_log, log_sha):
+        return True
+    return False
 
 # Đọc dữ liệu từ GitHub
 db_licenses, file_sha = get_remote_licenses()
@@ -68,6 +130,8 @@ if "is_licensed" not in st.session_state:
     st.session_state.is_licensed = False
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
+if "current_client_name" not in st.session_state:
+    st.session_state.current_client_name = ""
 
 if not st.session_state.is_licensed and not st.session_state.is_admin:
     st.sidebar.title("🔐 KÍCH HOẠT BẢN QUYỀN")
@@ -77,23 +141,51 @@ if not st.session_state.is_licensed and not st.session_state.is_admin:
         key_input = user_key.strip()
         if key_input == ADMIN_KEY:
             st.session_state.is_admin = True
+            log_activity("ADMIN_LOGIN", {"timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")})
             st.rerun()
             
         client_key = key_input.upper()
         if client_key in db_licenses:
             client_info = db_licenses[client_key]
+            client_name = client_info.get("client_name", "Unknown")
+            
             if client_info.get("status") == "blocked":
                 st.sidebar.error("❌ Mã bản quyền này đã bị thu hồi hoặc khóa truy cập!")
+                log_activity("LOGIN_FAILED", {
+                    "reason": "KEY_BLOCKED",
+                    "key": client_key,
+                    "client_name": client_name,
+                    "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                })
             else:
                 exp_date = datetime.strptime(client_info["expiry"], "%Y-%m-%d").date()
                 if datetime.now().date() > exp_date:
                     st.sidebar.error(f"❌ Bản quyền đã hết hạn vào ngày {exp_date.strftime('%d/%m/%Y')}!")
+                    log_activity("LOGIN_FAILED", {
+                        "reason": "KEY_EXPIRED",
+                        "key": client_key,
+                        "client_name": client_name,
+                        "expiry_date": exp_date.strftime("%d/%m/%Y"),
+                        "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                    })
                 else:
                     st.session_state.is_licensed = True
+                    st.session_state.current_client_name = client_name
                     st.sidebar.success(f"Hợp lệ! Hạn sử dụng: {exp_date.strftime('%d/%m/%Y')}")
+                    log_activity("LOGIN_SUCCESS", {
+                        "key": client_key,
+                        "client_name": client_name,
+                        "expiry_date": exp_date.strftime("%d/%m/%Y"),
+                        "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                    })
                     st.rerun()
         else:
             st.sidebar.error("Mã kích hoạt không tồn tại trên hệ thống!")
+            log_activity("LOGIN_FAILED", {
+                "reason": "KEY_NOT_FOUND",
+                "key": client_key,
+                "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            })
 
     st.warning("⚠️ Vui lòng nhập License Key ở thanh menu bên trái để mở khóa phần mềm.")
     st.stop()
@@ -105,9 +197,9 @@ if st.session_state.is_admin:
     st.title("🔑 BẢNG QUẢN TRỊ BẢN QUYỀN (ĐỒNG BỘ GITHUB)")
     st.info("Dữ liệu được lưu vĩnh viễn vào file licenses.json trên GitHub Repository.")
     
-    tab_tao, tab_ql = st.tabs(["➕ Tạo Key Mới (Không ngày tháng)", "📋 Danh Sách & Gia Hạn / Hủy"])
+    tab_tao, tab_ql, tab_log = st.tabs(["➕ Tạo Key Mới (Không ngày tháng)", "📋 Danh Sách & Gia Hạn / Hủy", "📊 Nhật Ký Hoạt Động"])
 
-   # TAB 1: TẠO KEY MỚI CHUẨN QUỐC TẾ (4 CỤM ĐỘC LẬP)
+    # TAB 1: TẠO KEY MỚI CHUẨN QUỐC TẾ (4 CỤM ĐỘC LẬP)
     with tab_tao:
         c1, c2 = st.columns(2)
         with c1:
@@ -128,6 +220,12 @@ if st.session_state.is_admin:
                 "status": "active"
             }
             if update_remote_licenses(db_licenses, file_sha):
+                log_activity("KEY_CREATED", {
+                    "key": generated_key,
+                    "client_name": c_name,
+                    "expiry_date": ngay_het.strftime("%d/%m/%Y"),
+                    "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                })
                 st.success(f"Đã tạo Key thành công cho {c_name}!")
                 st.code(generated_key, language="text")
                 st.info("Gửi mã trên cho khách hàng. Khách sẽ dùng cố định mã này vĩnh viễn.")
@@ -158,6 +256,12 @@ if st.session_state.is_admin:
                         if st.button("Cập nhật hạn", key=f"btn_date_{k}"):
                             db_licenses[k]["expiry"] = new_date.strftime("%Y-%m-%d")
                             if update_remote_licenses(db_licenses, file_sha):
+                                log_activity("KEY_EXTENDED", {
+                                    "key": k,
+                                    "client_name": ten_hien_thi,
+                                    "new_expiry_date": new_date.strftime("%d/%m/%Y"),
+                                    "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                                })
                                 st.success("Đã gia hạn thành công!")
                                 st.rerun()
                             else:
@@ -170,12 +274,22 @@ if st.session_state.is_admin:
                             if st.button("🚫 Khóa Key", key=f"block_{k}", type="secondary"):
                                 db_licenses[k]["status"] = "blocked"
                                 update_remote_licenses(db_licenses, file_sha)
+                                log_activity("KEY_BLOCKED", {
+                                    "key": k,
+                                    "client_name": ten_hien_thi,
+                                    "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                                })
                                 st.warning("Đã khóa bản quyền!")
                                 st.rerun()
                         else:
                             if st.button("✅ Mở khóa", key=f"unblock_{k}"):
                                 db_licenses[k]["status"] = "active"
                                 update_remote_licenses(db_licenses, file_sha)
+                                log_activity("KEY_UNBLOCKED", {
+                                    "key": k,
+                                    "client_name": ten_hien_thi,
+                                    "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                                })
                                 st.success("Đã mở khóa lại!")
                                 st.rerun()
                         
@@ -184,10 +298,60 @@ if st.session_state.is_admin:
                         if st.button("🗑️ Xóa vĩnh viễn", key=f"del_{k}", type="primary"):
                             del db_licenses[k]
                             if update_remote_licenses(db_licenses, file_sha):
+                                log_activity("KEY_DELETED", {
+                                    "key": k,
+                                    "client_name": ten_hien_thi,
+                                    "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                                })
                                 st.success(f"Đã xóa vĩnh viễn key `{k}`!")
                                 st.rerun()
                             else:
                                 st.error("Lỗi khi xóa key trên GitHub!")
+
+    # TAB 3: XEM NHẬT KÝ HOẠT ĐỘNG
+    with tab_log:
+        st.subheader("📊 Nhật Ký Hoạt Động Đăng Nhập")
+        
+        activity_log, _ = get_remote_activity_log()
+        
+        if not activity_log:
+            st.info("Chưa có hoạt động nào được ghi nhận.")
+        else:
+            # Đảo ngược để hiển thị log mới nhất trước
+            activity_log_reversed = list(reversed(activity_log))
+            
+            # Lọc theo loại hoạt động
+            filter_type = st.selectbox(
+                "Lọc theo loại hoạt động:",
+                ["Tất cả", "LOGIN_SUCCESS", "LOGIN_FAILED", "ADMIN_LOGIN", "KEY_CREATED", "KEY_EXTENDED", "KEY_BLOCKED", "KEY_UNBLOCKED", "KEY_DELETED"]
+            )
+            
+            if filter_type != "Tất cả":
+                activity_log_reversed = [log for log in activity_log_reversed if log.get("type") == filter_type]
+            
+            # Chuyển đổi sang DataFrame để hiển thị
+            df_log = pd.DataFrame([
+                {
+                    "⏰ Thời gian": log.get("timestamp", "N/A"),
+                    "📌 Loại": log.get("type", "N/A"),
+                    "👤 Khách hàng": log.get("details", {}).get("client_name", "N/A"),
+                    "🔑 Key": log.get("details", {}).get("key", "N/A"),
+                    "📝 Chi tiết": str(log.get("details", {}))
+                }
+                for log in activity_log_reversed[:100]  # Hiển thị 100 log gần nhất
+            ])
+            
+            st.dataframe(df_log, use_container_width=True, hide_index=True)
+            
+            # Nút export log
+            csv_log = df_log.to_csv(index=False, encoding='utf-8-sig')
+            st.download_button(
+                label="📥 Tải xuống CSV",
+                data=csv_log,
+                file_name=f"activity_log_{datetime.now().strftime('%d%m%Y_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+
 # =========================================================================
 # 1. NẠP DỮ LIỆU TỪ SHEET T4.2026 (ĐƠN GIÁ LÀM TRÒN SỐ NGUYÊN)
 # =========================================================================
@@ -242,7 +406,7 @@ else:
         {"MÃ VTHH": "Bánh Khoai Tây xá 4kg", "TÊN VTHH": "Bánh Khoai Tây xá 4kg", "ĐVT": "kg", "ĐƠN GIÁ": 58850, "TỒN ĐẦU": 4},
         {"MÃ VTHH": "VP26_01", "TÊN VTHH": "Nước T-REXX Oishi Túi 180ml (5 bịch/T)", "ĐVT": "Bịch", "ĐƠN GIÁ": 28160, "TỒN ĐẦU": 25},
         {"MÃ VTHH": "VP26_02", "TÊN VTHH": "Bánh snack Oishi 2K (10 bịch/bao)", "ĐVT": "Bịch", "ĐƠN GIÁ": 15248, "TỒN ĐẦU": 280},
-        {"MÃ VTHH": "VP26_10", "TÊN VTHH": "Bánh snack Oishi 5K (8 bịch/bao)", "ĐVT": "Bịch", "ĐƠN GIÁ": 38500, "TỒN ĐẦU": 8},
+        {"MÃ VTHH": "VP26_10", "TÊN VTHH": "Bánh snack Oishi 5K (8 bịch/bao)", "ĐVT": "Bịch", "ĐƠN GIÁ": 38500, "TỪN ĐẦU": 8},
         {"MÃ VTHH": "VP26_13", "TÊN VTHH": "Bánh Chấm 330g PC (12 cái)", "ĐVT": "Cái", "ĐƠN GIÁ": 2383, "TỒN ĐẦU": 120},
         {"MÃ VTHH": "VP26_32", "TÊN VTHH": "Thạch miếng nhỏ Suso LƯỚI 800g (62 cái)", "ĐVT": "Cái", "ĐƠN GIÁ": 550, "TỒN ĐẦU": 372},
         {"MÃ VTHH": "VP26_40", "TÊN VTHH": "Coke 300ml - Coca Chai Nhí 5K", "ĐVT": "Chai", "ĐƠN GIÁ": 4285, "TỒN ĐẦU": 24},
