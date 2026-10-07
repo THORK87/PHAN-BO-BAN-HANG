@@ -735,7 +735,7 @@ if btn_run:
     tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
     ton_con_lai = ton_arr - bu_arr
     # Cập nhật cột TỒN CUỐI ngược lại vào bảng nhập liệu phía trên
-   if "df_data" in st.session_state:
+    if "df_data" in st.session_state:
         st.session_state.df_data["TỒN CUỐI"] = ton_arr - bu_arr
     tong_ton_con_lai_vnd = np.sum(ton_con_lai * gia_arr)
 
