@@ -630,24 +630,31 @@ else:
         ]
     )
 
-# Khởi tạo bảng dữ liệu trong session_state nếu chưa có
-if "df_data" not in st.session_state:
-  st.session_state.df_data = df_init.copy()
+# Cập nhật lại session_state khi người dùng upload file Excel mới
+if file_upload is not None:
+    if "last_uploaded_file" not in st.session_state or st.session_state.last_uploaded_file != file_upload.name:
+        st.session_state.last_uploaded_file = file_upload.name
+        st.session_state.df_data = df_init.copy()
 
-# Cấu hình hiển thị cột cho bảng nhập liệu
+if "df_data" not in st.session_state:
+    st.session_state.df_data = df_init.copy()
+
+# Định thứ tự cột: đưa TỒN CUỐI vào ngay sau TỒN ĐẦU nếu đã chạy phân bổ
+cot_hien_thi = ["MÃ VTHH", "TÊN VTHH", "ĐVT", "ĐƠN GIÁ", "TỒN ĐẦU"]
+if "TỒN CUỐI" in st.session_state.df_data.columns:
+    cot_hien_thi.append("TỒN CUỐI")
+
 col_config = {
     "ĐƠN GIÁ": st.column_config.NumberColumn("ĐƠN GIÁ (VNĐ)", format="%d"),
     "TỒN ĐẦU": st.column_config.NumberColumn("TỒN ĐẦU", format="%d"),
 }
-
-# Nếu đã có cột TỒN CUỐI thì khóa không cho sửa cột này (chỉ xem)
 if "TỒN CUỐI" in st.session_state.df_data.columns:
-  col_config["TỒN CUỐI"] = st.column_config.NumberColumn(
-      "TỒN CUỐI (Sau phân bổ)", format="%d", disabled=True
-  )
+    col_config["TỒN CUỐI"] = st.column_config.NumberColumn(
+        "TỒN CUỐI (Sau phân bổ)", format="%d", disabled=True
+    )
 
 edited_df = st.data_editor(
-    st.session_state.df_data,
+    st.session_state.df_data[cot_hien_thi],
     num_rows="dynamic",
     use_container_width=True,
     column_config=col_config,
@@ -734,10 +741,9 @@ if btn_run:
 
     tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
     ton_con_lai = ton_arr - bu_arr
-    # Cập nhật cột TỒN CUỐI ngược lại vào bảng nhập liệu phía trên
-    if "df_data" in st.session_state:
-        st.session_state.df_data["TỒN CUỐI"] = ton_arr - bu_arr
-    tong_ton_con_lai_vnd = np.sum(ton_con_lai * gia_arr)
+    # Cập nhật chính xác TỒN CUỐI vào bảng nhập liệu theo MÃ VTHH (chuẩn 100%, không lệch dòng)
+    map_ton_cuoi = dict(zip(df_items["MÃ VTHH"], df_items["TỒN CUỐI"]))
+    st.session_state.df_data["TỒN CUỐI"] = st.session_state.df_data["MÃ VTHH"].map(map_ton_cuoi).fillna(st.session_state.df_data["TỒN ĐẦU"]).astype(int)
 
     if tien_con_lai > 0 and tong_ton_con_lai_vnd > 0:
         ti_le_phu = min(1.0, tien_con_lai / tong_ton_con_lai_vnd)
