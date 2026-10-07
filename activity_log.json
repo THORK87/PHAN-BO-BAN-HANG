@@ -33,5 +33,15 @@
     "details": {
       "timestamp": "07/10/2026 03:10:26"
     }
+  },
+  {
+    "timestamp": "07/10/2026 03:10:45",
+    "type": "KEY_EXTENDED",
+    "details": {
+      "key": "00000-20260924-F3A2-CE50",
+      "client_name": "TUAN DAT",
+      "new_expiry_date": "30/10/2026",
+      "timestamp": "07/10/2026 03:10:44"
+    }
   }
 ]
