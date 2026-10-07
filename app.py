@@ -198,3 +198,851 @@ if not st.session_state.is_licensed and not st.session_state.is_admin:
                     st.sidebar.success(
                         f"Hợp lệ! Hạn sử dụng: {exp_date.strftime('%d/%m/%Y')}"
                     )
+                    log_activity(
+                        "LOGIN_SUCCESS",
+                        {
+                            "key": client_key,
+                            "client_name": client_name,
+                            "expiry_date": exp_date.strftime("%d/%m/%Y"),
+                            "timestamp": datetime.now().strftime(
+                                "%d/%m/%Y %H:%M:%S"
+                            ),
+                        },
+                    )
+                    st.rerun()
+        else:
+            st.sidebar.error("Mã kích hoạt không tồn tại trên hệ thống!")
+            log_activity(
+                "LOGIN_FAILED",
+                {
+                    "reason": "KEY_NOT_FOUND",
+                    "key": client_key,
+                    "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                },
+            )
+
+    st.warning(
+        "⚠️ Vui lòng nhập License Key ở thanh menu bên trái để mở khóa phần mềm."
+    )
+    st.stop()
+
+# =========================================================================
+# 2. BẢNG ĐIỀU KHIỂN QUẢN TRỊ ADMIN (TẠO - GIA HẠN - HỦY)
+# =========================================================================
+if st.session_state.is_admin:
+    st.title("🔑 BẢNG QUẢN TRỊ BẢN QUYỀN (ĐỒNG BỘ GITHUB)")
+    st.info(
+        "Dữ liệu được lưu vĩnh viễn vào file licenses.json trên GitHub Repository."
+    )
+
+    tab_tao, tab_ql, tab_log = st.tabs(
+        [
+            "➕ Tạo Key Mới (Không ngày tháng)",
+            "📋 Danh Sách & Gia Hạn / Hủy",
+            "📊 Nhật Ký Hoạt Động",
+        ]
+    )
+
+    # TAB 1: TẠO KEY MỚI
+    with tab_tao:
+        c1, c2 = st.columns(2)
+        with c1:
+            ten_khach = st.text_input(
+                "Ghi chú tên khách hàng (quản lý nội bộ):", value="CONGTY_ABC"
+            )
+        with c2:
+            ngay_het = st.date_input(
+                "Hạn sử dụng ban đầu:", value=date(2027, 1, 1)
+            )
+
+        if st.button("🚀 Tạo License Key Quốc Tế", type="primary"):
+            c_name = ten_khach.strip() if ten_khach.strip() else "KHACH_HANG"
+            parts = [secrets.token_hex(2).upper() for _ in range(4)]
+            generated_key = "-".join(parts)
+
+            db_licenses[generated_key] = {
+                "client_name": c_name,
+                "expiry": ngay_het.strftime("%Y-%m-%d"),
+                "status": "active",
+            }
+            if update_remote_licenses(db_licenses, file_sha):
+                log_activity(
+                    "KEY_CREATED",
+                    {
+                        "key": generated_key,
+                        "client_name": c_name,
+                        "expiry_date": ngay_het.strftime("%d/%m/%Y"),
+                        "timestamp": datetime.now().strftime(
+                            "%d/%m/%Y %H:%M:%S"
+                        ),
+                    },
+                )
+                st.success(f"Đã tạo Key thành công cho {c_name}!")
+                st.code(generated_key, language="text")
+                st.info(
+                    "Gửi mã trên cho khách hàng. Khách sẽ dùng cố định mã này vĩnh viễn."
+                )
+                st.rerun()
+            else:
+                st.error(
+                    "Lỗi khi lưu lên GitHub. Vui lòng kiểm tra lại GITHUB_TOKEN trong Secrets."
+                )
+
+    # TAB 2: QUẢN LÝ
+    with tab_ql:
+        if not db_licenses:
+            st.info("Chưa có mã bản quyền nào trên GitHub.")
+        else:
+            for k, v in list(db_licenses.items()):
+                ten_hien_thi = v.get("client_name", k)
+                with st.expander(
+                    f"Khách hàng: {ten_hien_thi} | Key: {k}", expanded=True
+                ):
+                    col_info, col_han, col_action = st.columns([2.5, 2, 2])
+                    with col_info:
+                        st.write(f"**Khách hàng:** `{ten_hien_thi}`")
+                        st.code(k, language="text")
+                        st.write(
+                            f"Trạng thái: {'🟢 Hoạt động' if v['status'] == 'active' else '🔴 ĐÃ KHÓA'}"
+                        )
+                        st.write(
+                            f"Hạn: **{datetime.strptime(v['expiry'], '%Y-%m-%d').strftime('%d/%m/%Y')}**"
+                        )
+
+                    with col_han:
+                        cur_date = datetime.strptime(
+                            v["expiry"], "%Y-%m-%d"
+                        ).date()
+                        new_date = st.date_input(
+                            "Chọn hạn mới:", value=cur_date, key=f"date_{k}"
+                        )
+                        if st.button("Cập nhật hạn", key=f"btn_date_{k}"):
+                            db_licenses[k]["expiry"] = new_date.strftime(
+                                "%Y-%m-%d"
+                            )
+                            if update_remote_licenses(db_licenses, file_sha):
+                                log_activity(
+                                    "KEY_EXTENDED",
+                                    {
+                                        "key": k,
+                                        "client_name": ten_hien_thi,
+                                        "new_expiry_date": new_date.strftime(
+                                            "%d/%m/%Y"
+                                        ),
+                                        "timestamp": datetime.now().strftime(
+                                            "%d/%m/%Y %H:%M:%S"
+                                        ),
+                                    },
+                                )
+                                st.success("Đã gia hạn thành công!")
+                                st.rerun()
+                            else:
+                                st.error("Lỗi khi cập nhật lên GitHub!")
+
+                    with col_action:
+                        st.write("Thao tác bản quyền:")
+                        if v["status"] == "active":
+                            if st.button(
+                                "🚫 Khóa Key",
+                                key=f"block_{k}",
+                                type="secondary",
+                            ):
+                                db_licenses[k]["status"] = "blocked"
+                                update_remote_licenses(db_licenses, file_sha)
+                                log_activity(
+                                    "KEY_BLOCKED",
+                                    {
+                                        "key": k,
+                                        "client_name": ten_hien_thi,
+                                        "timestamp": datetime.now().strftime(
+                                            "%d/%m/%Y %H:%M:%S"
+                                        ),
+                                    },
+                                )
+                                st.warning("Đã khóa bản quyền!")
+                                st.rerun()
+                        else:
+                            if st.button("✅ Mở khóa", key=f"unblock_{k}"):
+                                db_licenses[k]["status"] = "active"
+                                update_remote_licenses(db_licenses, file_sha)
+                                log_activity(
+                                    "KEY_UNBLOCKED",
+                                    {
+                                        "key": k,
+                                        "client_name": ten_hien_thi,
+                                        "timestamp": datetime.now().strftime(
+                                            "%d/%m/%Y %H:%M:%S"
+                                        ),
+                                    },
+                                )
+                                st.success("Đã mở khóa lại!")
+                                st.rerun()
+
+                        st.write("")
+                        if st.button(
+                            "🗑️ Xóa vĩnh viễn", key=f"del_{k}", type="primary"
+                        ):
+                            del db_licenses[k]
+                            if update_remote_licenses(db_licenses, file_sha):
+                                log_activity(
+                                    "KEY_DELETED",
+                                    {
+                                        "key": k,
+                                        "client_name": ten_hien_thi,
+                                        "timestamp": datetime.now().strftime(
+                                            "%d/%m/%Y %H:%M:%S"
+                                        ),
+                                    },
+                                )
+                                st.success(f"Đã xóa vĩnh viễn key `{k}`!")
+                                st.rerun()
+                            else:
+                                st.error("Lỗi khi xóa key trên GitHub!")
+
+    # TAB 3: XEM NHẬT KÝ
+    with tab_log:
+        st.subheader("📊 Nhật Ký Hoạt Động Đăng Nhập")
+        activity_log, _ = get_remote_activity_log()
+        if not activity_log:
+            st.info("Chưa có hoạt động nào được ghi nhận.")
+        else:
+            activity_log_reversed = list(reversed(activity_log))
+            filter_type = st.selectbox(
+                "Lọc theo loại hoạt động:",
+                [
+                    "Tất cả",
+                    "LOGIN_SUCCESS",
+                    "LOGIN_FAILED",
+                    "ADMIN_LOGIN",
+                    "KEY_CREATED",
+                    "KEY_EXTENDED",
+                    "KEY_BLOCKED",
+                    "KEY_UNBLOCKED",
+                    "KEY_DELETED",
+                ],
+            )
+            if filter_type != "Tất cả":
+                activity_log_reversed = [
+                    log
+                    for log in activity_log_reversed
+                    if log.get("type") == filter_type
+                ]
+
+            df_log = pd.DataFrame(
+                [
+                    {
+                        "⏰ Thời gian": log.get("timestamp", "N/A"),
+                        "📌 Loại": log.get("type", "N/A"),
+                        "👤 Khách hàng": log.get("details", {}).get(
+                            "client_name", "N/A"
+                        ),
+                        "🔑 Key": log.get("details", {}).get("key", "N/A"),
+                        "📝 Chi tiết": str(log.get("details", {})),
+                    }
+                    for log in activity_log_reversed[:100]
+                ]
+            )
+            st.dataframe(df_log, use_container_width=True, hide_index=True)
+            csv_log = df_log.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                label="📥 Tải xuống CSV",
+                data=csv_log,
+                file_name=f"activity_log_{datetime.now().strftime('%d%m%Y_%H%M%S')}.csv",
+                mime="text/csv",
+            )
+
+# =========================================================================
+# 1. NẠP DỮ LIỆU TỪ SHEET T4.2026
+# =========================================================================
+st.subheader("1. DANH MỤC HÀNG HÓA")
+
+df_mau = pd.DataFrame(
+    {
+        "Mã VTHH (*)": ["SP01", "SP02", "SP03"],
+        "Tên VTHH (*)": [
+            "Sản phẩm mẫu A",
+            "Sản phẩm mẫu B",
+            "Sản phẩm mẫu C",
+        ],
+        "ĐVT chính": ["Cái", "Hộp", "Gói"],
+        "Giá bán cố định": [50000, 120000, 25000],
+        "Tồn gốc (ẩn)": [100, 50, 200],
+    }
+)
+buffer_mau = io.BytesIO()
+with pd.ExcelWriter(buffer_mau, engine="openpyxl") as writer:
+    df_mau.to_excel(writer, sheet_name="T4.2026", index=False)
+
+col_up, col_btn = st.columns([3, 1])
+with col_up:
+    file_upload = st.file_uploader(
+        "Kéo thả file số liệu vào đây:", type=["xlsx"]
+    )
+with col_btn:
+    st.write("")
+    st.write("")
+    st.download_button(
+        label="📥 Tải file mẫu Excel",
+        data=buffer_mau.getvalue(),
+        file_name="MAU_PHAN_BO_BAN_HANG.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        help="Tải file mẫu Excel có sẵn các cột chuẩn để nhập liệu",
+    )
+
+if file_upload is not None:
+    try:
+        xls = pd.ExcelFile(file_upload)
+        sheet_target = (
+            "T4.2026" if "T4.2026" in xls.sheet_names else xls.sheet_names[0]
+        )
+        df_source = pd.read_excel(xls, sheet_target)
+        df_source = df_source.dropna(subset=[df_source.columns[0]]).copy()
+
+        df_init = pd.DataFrame(
+            {
+                "MÃ VTHH": df_source["Mã VTHH (*)"],
+                "TÊN VTHH": df_source["Tên VTHH (*)"],
+                "ĐVT": df_source["ĐVT chính"],
+                "ĐƠN GIÁ": pd.to_numeric(
+                    df_source["Giá bán cố định"], errors="coerce"
+                )
+                .fillna(0)
+                .round(0)
+                .astype(int),
+                "TỒN ĐẦU": pd.to_numeric(
+                    df_source["Tồn gốc (ẩn)"], errors="coerce"
+                )
+                .fillna(0)
+                .round(0)
+                .astype(int),
+            }
+        )
+        st.success(
+            f"Đã nạp chính xác {len(df_init)} mặt hàng từ sheet '{sheet_target}'."
+        )
+    except Exception as e:
+        st.error(f"Lỗi đọc file: {e}")
+        df_init = pd.DataFrame(
+            columns=["MÃ VTHH", "TÊN VTHH", "ĐVT", "ĐƠN GIÁ", "TỒN ĐẦU"]
+        )
+else:
+    df_init = pd.DataFrame(
+        [
+            {
+                "MÃ VTHH": "Bánh Khoai Tây xá 4kg",
+                "TÊN VTHH": "Bánh Khoai Tây xá 4kg",
+                "ĐVT": "kg",
+                "ĐƠN GIÁ": 58850,
+                "TỒN ĐẦU": 4,
+            },
+            {
+                "MÃ VTHH": "VP26_01",
+                "TÊN VTHH": "Nước T-REXX Oishi Túi 180ml (5 bịch/T)",
+                "ĐVT": "Bịch",
+                "ĐƠN GIÁ": 28160,
+                "TỒN ĐẦU": 25,
+            },
+            {
+                "MÃ VTHH": "VP26_02",
+                "TÊN VTHH": "Bánh snack Oishi 2K (10 bịch/bao)",
+                "ĐVT": "Bịch",
+                "ĐƠN GIÁ": 15248,
+                "TỒN ĐẦU": 280,
+            },
+            {
+                "MÃ VTHH": "VP26_10",
+                "TÊN VTHH": "Bánh snack Oishi 5K (8 bịch/bao)",
+                "ĐVT": "Bịch",
+                "ĐƠN GIÁ": 38500,
+                "TỒN ĐẦU": 8,
+            },
+            {
+                "MÃ VTHH": "VP26_13",
+                "TÊN VTHH": "Bánh Chấm 330g PC (12 cái)",
+                "ĐVT": "Cái",
+                "ĐƠN GIÁ": 2383,
+                "TỒN ĐẦU": 120,
+            },
+            {
+                "MÃ VTHH": "VP26_32",
+                "TÊN VTHH": "Thạch miếng nhỏ Suso LƯỚI 800g (62 cái)",
+                "ĐVT": "Cái",
+                "ĐƠN GIÁ": 550,
+                "TỒN ĐẦU": 372,
+            },
+            {
+                "MÃ VTHH": "VP26_40",
+                "TÊN VTHH": "Coke 300ml - Coca Chai Nhí 5K",
+                "ĐVT": "Chai",
+                "ĐƠN GIÁ": 4285,
+                "TỒN ĐẦU": 24,
+            },
+            {
+                "MÃ VTHH": "VP26_41",
+                "TÊN VTHH": "Đậu phộng Oishi 1K (20 dây/T)",
+                "ĐVT": "Dây",
+                "ĐƠN GIÁ": 7637,
+                "TỒN ĐẦU": 20,
+            },
+            {
+                "MÃ VTHH": "VP26_43",
+                "TÊN VTHH": "Thạch SUSO Cây Dài (24 cái)",
+                "ĐVT": "Cái",
+                "ĐƠN GIÁ": 1375,
+                "TỒN ĐẦU": 432,
+            },
+            {
+                "MÃ VTHH": "VP26_45",
+                "TÊN VTHH": "Mì Vàng Enaak 30g (24 gói/Hộp)",
+                "ĐVT": "Gói",
+                "ĐƠN GIÁ": 5500,
+                "TỒN ĐẦU": 144,
+            },
+            {
+                "MÃ VTHH": "VP26_46",
+                "TÊN VTHH": "Nước ÉP THẠCH Suso (48 ly)",
+                "ĐVT": "Ly",
+                "ĐƠN GIÁ": 3942,
+                "TỒN ĐẦU": 480,
+            },
+            {
+                "MÃ VTHH": "VP26_47",
+                "TÊN VTHH": "Kẹo Cao Su Dinos 500g (69 viên)",
+                "ĐVT": "Viên",
+                "ĐƠN GIÁ": 829,
+                "TỒN ĐẦU": 759,
+            },
+            {
+                "MÃ VTHH": "VP26_49",
+                "TÊN VTHH": "Bánh Mứt Dâu Xá 4kg PC",
+                "ĐVT": "kg",
+                "ĐƠN GIÁ": 61875,
+                "TỒN ĐẦU": 4,
+            },
+            {
+                "MÃ VTHH": "VP26_50",
+                "TÊN VTHH": "Nước Túi Oishi (10 túi x 5 bịch / T)",
+                "ĐVT": "Túi",
+                "ĐƠN GIÁ": 2560,
+                "TỒN ĐẦU": 500,
+            },
+        ]
+    )
+
+edited_df = st.data_editor(
+    df_init,
+    num_rows="dynamic",
+    use_container_width=True,
+    column_config={
+        "ĐƠN GIÁ": st.column_config.NumberColumn("ĐƠN GIÁ (VNĐ)", format="%d"),
+        "TỒN ĐẦU": st.column_config.NumberColumn("TỒN ĐẦU", format="%d"),
+    },
+)
+
+# =========================================================================
+# 2. THIẾT LẬP THÔNG SỐ PHÂN BỔ (BỔ SUNG CHỌN NGÀY BẮT ĐẦU BÁN)
+# =========================================================================
+st.subheader("2. THIẾT LẬP THÔNG SỐ PHÂN BỔ")
+c_ngay_bd, c1, c2, c3 = st.columns(4)
+
+with c_ngay_bd:
+    ngay_bat_dau = st.date_input("NGÀY BẮT ĐẦU BÁN:", value=date.today())
+with c1:
+    so_ngay = st.number_input(
+        "SỐ NGÀY BÁN (Nhập số nguyên):",
+        min_value=1,
+        max_value=31,
+        value=5,
+        step=1,
+    )
+with c2:
+    bien_do = st.number_input(
+        "ĐỘ LỆCH DOANH THU CÁC NGÀY (0.0 = san phẳng tuyệt đối):",
+        min_value=0.0,
+        max_value=3.0,
+        value=0.0,
+        step=0.05,
+        format="%.2f",
+    )
+with c3:
+    tong_tien_muc_tieu = st.number_input(
+        "DOANH THU TỔNG (VNĐ):",
+        min_value=0.0,
+        value=10000000.0,
+        step=500000.0,
+        format="%.0f",
+    )
+    st.caption(f"👉 Số tiền: **{int(tong_tien_muc_tieu):,} đ**")
+
+btn_run = st.button("🚀 CHẠY PHÂN BỔ ", type="primary")
+
+# =========================================================================
+# 3. THUẬT TOÁN TỐI ƯU 2 CHIỀU (KNAPSACK GREEDY)
+# =========================================================================
+if btn_run:
+    df_items = edited_df.dropna(subset=["MÃ VTHH"]).copy().reset_index(drop=True)
+    df_items["ĐƠN GIÁ"] = (
+        pd.to_numeric(df_items["ĐƠN GIÁ"], errors="coerce")
+        .fillna(0)
+        .round(0)
+        .astype(int)
+    )
+    df_items["TỒN ĐẦU"] = (
+        pd.to_numeric(df_items["TỒN ĐẦU"], errors="coerce")
+        .fillna(0)
+        .round(0)
+        .astype(int)
+    )
+
+    n = len(df_items)
+    if n == 0 or tong_tien_muc_tieu <= 0:
+        st.warning("Vui lòng kiểm tra lại danh sách hàng và số tiền phân bổ!")
+        st.stop()
+
+    so_ngay_int = int(so_ngay)
+    danh_sach_ngay = [f"Ngày {d}" for d in range(1, so_ngay_int + 1)]
+
+    ton_arr = df_items["TỒN ĐẦU"].values
+    gia_arr = df_items["ĐƠN GIÁ"].values
+
+    # --- TÍNH BU: LẤY ĐA DẠNG HÀNG HÓA KHI SỐ TIỀN NHỎ ---
+    tong_gia_tri_ton = np.sum(ton_arr * gia_arr)
+    bu_arr = np.zeros(n, dtype=int)
+    tien_hien_tai = 0.0
+
+    idx_sorted_by_price = np.argsort(gia_arr)
+    for i in idx_sorted_by_price:
+        if gia_arr[i] > 0 and ton_arr[i] > 0:
+            if tien_hien_tai + gia_arr[i] <= tong_tien_muc_tieu:
+                bu_arr[i] = 1
+                tien_hien_tai += gia_arr[i]
+
+    tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
+    ton_con_lai = ton_arr - bu_arr
+    tong_ton_con_lai_vnd = np.sum(ton_con_lai * gia_arr)
+
+    if tien_con_lai > 0 and tong_ton_con_lai_vnd > 0:
+        ti_le_phu = min(1.0, tien_con_lai / tong_ton_con_lai_vnd)
+        sl_them = np.floor(ton_con_lai * ti_le_phu).astype(int)
+        sl_them = np.minimum(sl_them, ton_con_lai)
+        bu_arr += sl_them
+        tien_hien_tai = np.sum(bu_arr * gia_arr)
+
+    tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
+    if tien_con_lai > 0:
+        for i in range(n):
+            if gia_arr[i] > 0 and bu_arr[i] < ton_arr[i]:
+                sl_bu_max = ton_arr[i] - bu_arr[i]
+                sl_can_bu = int(tien_con_lai // gia_arr[i])
+                sl_thuc_bu = min(sl_bu_max, sl_can_bu)
+                if sl_thuc_bu > 0:
+                    bu_arr[i] += sl_thuc_bu
+                    tien_con_lai -= sl_thuc_bu * gia_arr[i]
+                    if tien_con_lai < np.min(gia_arr[gia_arr > 0]):
+                        break
+
+    df_items["TỔNG SL BÁN"] = bu_arr
+    df_items["THÀNH TIỀN"] = bu_arr * gia_arr
+    df_items["TỒN CUỐI"] = ton_arr - bu_arr
+
+    # 1. Xác định doanh thu mục tiêu từng ngày (theo bien_do)
+    avg_day = tong_tien_muc_tieu / so_ngay_int
+    day_targets = np.zeros(so_ngay_int, dtype=float)
+    for d in range(so_ngay_int):
+        wave = (
+            np.sin((d + 1) * 2 * np.pi / so_ngay_int) if so_ngay_int > 1 else 0
+        )
+        day_targets[d] = avg_day * (1.0 + bien_do * wave)
+
+    day_targets = day_targets * (tong_tien_muc_tieu / np.sum(day_targets))
+    day_ratios = day_targets / np.sum(day_targets)
+
+    # 2. Phân bổ ma trận đồng đều đa món
+    matrix_ngay = np.zeros((n, so_ngay_int), dtype=int)
+
+    for i in range(n):
+        total_qty = bu_arr[i]
+        if total_qty == 0:
+            continue
+
+        if total_qty <= 3:
+            indices = [
+                (
+                    int(round(k * (so_ngay_int - 1) / (total_qty - 1)))
+                    if total_qty > 1
+                    else so_ngay_int // 2
+                )
+                for k in range(total_qty)
+            ]
+            for d_idx in indices:
+                matrix_ngay[i, d_idx] += 1
+        else:
+            raw_dist = total_qty * day_ratios
+            base_dist = np.floor(raw_dist).astype(int)
+            matrix_ngay[i, :] += base_dist
+
+            rem = total_qty - np.sum(base_dist)
+            if rem > 0:
+                fractional_parts = raw_dist - base_dist
+                top_days = np.argsort(-fractional_parts)[:rem]
+                for d_idx in top_days:
+                    matrix_ngay[i, d_idx] += 1
+
+    # =========================================================================
+    # 4. HIỂN THỊ KẾT QUẢ DẠNG SỔ CHI TIẾT TỪ TRÊN XUỐNG & XUẤT EXCEL
+    # =========================================================================
+    st.divider()
+    st.subheader(f"3. KẾT QUẢ PHÂN BỔ (TỔNG CỘNG {so_ngay_int} NGÀY)")
+
+    tong_tien_thuc_te = int(np.sum(df_items["THÀNH TIỀN"]))
+    chenh_lech = tong_tien_thuc_te - int(tong_tien_muc_tieu)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("DOANH THU MỤC TIÊU", f"{tong_tien_muc_tieu:,.0f} đ")
+    m2.metric("ĐÃ PHÂN BỔ THỰC TẾ", f"{tong_tien_thuc_te:,.0f} đ")
+    m3.metric("CHÊNH LỆCH", f"{chenh_lech:,.0f} đ")
+
+    # Gom dữ liệu dạng sổ dọc theo từng ngày bán
+    records_hien_thi = []
+    tong_sl_ban_tat_ca = 0
+
+    for d_idx in range(so_ngay_int):
+        ngay_ban_str = (ngay_bat_dau + pd.Timedelta(days=d_idx)).strftime(
+            "%d/%m/%Y"
+        )
+        is_first = True
+
+        for i in range(n):
+            sl = matrix_ngay[i, d_idx]
+            if sl > 0:
+                gia = int(gia_arr[i])
+                thanh_tien = int(sl * gia)
+                tong_sl_ban_tat_ca += sl
+
+                # Dòng đầu tiên của ngày in Ngày HĐ, các dòng món tiếp theo để trống
+                records_hien_thi.append(
+                    {
+                        "ngay_in": ngay_ban_str if is_first else "",
+                        "ma_hang": df_items.loc[i, "MÃ VTHH"],
+                        "ten_hang": df_items.loc[i, "TÊN VTHH"],
+                        "dvt": df_items.loc[i, "ĐVT"],
+                        "so_luong": sl,
+                        "don_gia": gia,
+                        "thanh_tien": thanh_tien,
+                    }
+                )
+                is_first = False
+
+    st.markdown("#### 📋 BẢNG KÊ CHI TIẾT BÁN HÀNG THEO NGÀY")
+
+    # Xây dựng bảng giao diện chuẩn màu sắc và viền
+    html_code = """
+    <style>
+        .sales-table-wrap {
+            width: 100%;
+            overflow-x: auto;
+            max-height: 650px;
+            border: 1px solid #d5d5d5;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .sales-table-custom {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+            color: #111;
+            background-color: #fff;
+        }
+        .sales-table-custom th {
+            padding: 8px 10px;
+            font-weight: bold;
+            color: #ffffff;
+            text-align: center;
+            border: 1px solid #e0e0e0;
+        }
+        .sales-table-custom th.col-green {
+            background-color: #4F7942;
+            width: 13%;
+        }
+        .sales-table-custom th.col-orange {
+            background-color: #E26B00;
+        }
+        .sales-table-custom td {
+            padding: 6px 10px;
+            border-bottom: 1px solid #f2f2f2;
+            vertical-align: middle;
+        }
+        .sales-table-custom tr:hover {
+            background-color: #fbfbfb;
+        }
+        .td-c { text-align: center; }
+        .td-l { text-align: left; }
+        .td-r { text-align: right; }
+        .td-boxed {
+            text-align: right;
+            border: 1.5px solid #222 !important;
+            font-weight: 500;
+        }
+        .tfoot-sum {
+            background-color: #FFF2CC;
+            font-weight: bold;
+            border-top: 2px solid #aaa;
+        }
+    </style>
+    <div class="sales-table-wrap">
+    <table class="sales-table-custom">
+        <thead>
+            <tr>
+                <th class="col-green">Ngày HĐ</th>
+                <th class="col-orange">Mã hàng (*)</th>
+                <th class="col-orange">Tên hàng</th>
+                <th class="col-orange">ĐVT</th>
+                <th class="col-orange">Số lượng</th>
+                <th class="col-orange">Đơn giá</th>
+                <th class="col-orange">Thành tiền</th>
+            </tr>
+        </thead>
+        <tbody>
+    """
+
+    for r in records_hien_thi:
+        sl_fmt = f"{r['so_luong']:,d}".replace(",", ".")
+        gia_fmt = f"{r['don_gia']:,d}".replace(",", ".")
+        tien_fmt = f"{r['thanh_tien']:,d}".replace(",", ".")
+        html_code += f"""
+            <tr>
+                <td class="td-c" style="font-weight:bold; color:#1b5e20;">{r['ngay_in']}</td>
+                <td class="td-l">{r['ma_hang']}</td>
+                <td class="td-l">{r['ten_hang']}</td>
+                <td class="td-c">{r['dvt']}</td>
+                <td class="td-r">{sl_fmt}</td>
+                <td class="td-r">{gia_fmt}</td>
+                <td class="td-boxed">{tien_fmt}</td>
+            </tr>
+        """
+
+    sum_sl_fmt = f"{tong_sl_ban_tat_ca:,d}".replace(",", ".")
+    sum_tien_fmt = f"{tong_tien_thuc_te:,d}".replace(",", ".")
+    html_code += f"""
+        </tbody>
+        <tfoot>
+            <tr class="tfoot-sum">
+                <td colspan="4" class="td-c" style="padding: 10px;">TỔNG CỘNG PHÂN BỔ</td>
+                <td class="td-r" style="padding: 10px;">{sum_sl_fmt}</td>
+                <td></td>
+                <td class="td-boxed" style="padding: 10px; color: #b71c1c; font-size: 14px;">{sum_tien_fmt}</td>
+            </tr>
+        </tfoot>
+    </table>
+    </div>
+    """
+
+    st.markdown(html_code, unsafe_allow_html=True)
+
+    # --- TẠO FILE EXCEL ĐỊNH DẠNG MÀU SẮC CHUẨN MẪU ---
+    df_excel_export = pd.DataFrame(
+        [
+            {
+                "Ngày HĐ": r["ngay_in"],
+                "Mã hàng (*)": r["ma_hang"],
+                "Tên hàng": r["ten_hang"],
+                "ĐVT": r["dvt"],
+                "Số lượng": r["so_luong"],
+                "Đơn giá": r["don_gia"],
+                "Thành tiền": r["thanh_tien"],
+            }
+            for r in records_hien_thi
+        ]
+    )
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df_excel_export.to_excel(
+            writer, sheet_name="SO_CHI_TIET_BAN_HANG", index=False
+        )
+        ws = writer.sheets["SO_CHI_TIET_BAN_HANG"]
+
+        font_header = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        align_header = Alignment(
+            horizontal="center", vertical="center", wrap_text=True
+        )
+        fill_green = PatternFill(
+            start_color="4F7942", end_color="4F7942", fill_type="solid"
+        )
+        fill_orange = PatternFill(
+            start_color="E26B00", end_color="E26B00", fill_type="solid"
+        )
+
+        ws.row_dimensions[1].height = 26
+        for col_idx, cell in enumerate(ws[1], start=1):
+            cell.font = font_header
+            cell.alignment = align_header
+            cell.fill = fill_green if col_idx == 1 else fill_orange
+
+        align_center = Alignment(horizontal="center", vertical="center")
+        align_left = Alignment(horizontal="left", vertical="center")
+        align_right = Alignment(horizontal="right", vertical="center")
+        data_font = Font(name="Arial", size=10)
+        box_border = Border(
+            left=Side(style="thin", color="000000"),
+            right=Side(style="thin", color="000000"),
+            top=Side(style="thin", color="000000"),
+            bottom=Side(style="thin", color="000000"),
+        )
+
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+            ws.row_dimensions[row[0].row].height = 20
+            row[0].alignment = align_center
+            row[0].font = Font(name="Arial", size=10, bold=True)
+            row[1].alignment = align_left
+            row[1].font = data_font
+            row[2].alignment = align_left
+            row[2].font = data_font
+            row[3].alignment = align_center
+            row[3].font = data_font
+            row[4].alignment = align_right
+            row[4].number_format = "#,##0"
+            row[4].font = data_font
+            row[5].alignment = align_right
+            row[5].number_format = "#,##0"
+            row[5].font = data_font
+            row[6].alignment = align_right
+            row[6].number_format = "#,##0"
+            row[6].font = data_font
+            row[6].border = box_border
+
+        # Dòng tổng cộng
+        last_r = ws.max_row + 1
+        ws.row_dimensions[last_r].height = 24
+        ws.cell(last_r, 1, "TỔNG CỘNG").font = Font(
+            name="Arial", size=11, bold=True
+        )
+        ws.cell(last_r, 1).alignment = align_center
+        ws.cell(last_r, 5, tong_sl_ban_tat_ca).font = Font(
+            name="Arial", size=11, bold=True
+        )
+        ws.cell(last_r, 5).number_format = "#,##0"
+        ws.cell(last_r, 7, tong_tien_thuc_te).font = Font(
+            name="Arial", size=11, bold=True, color="990000"
+        )
+        ws.cell(last_r, 7).number_format = "#,##0"
+        ws.cell(last_r, 7).border = box_border
+
+        sum_fill = PatternFill(
+            start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"
+        )
+        for c in range(1, 8):
+            ws.cell(last_r, c).fill = sum_fill
+
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or "")) for cell in col)
+            col_letter = get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 13)
+
+    st.download_button(
+        label="📥 TẢI BẢNG KÊ CHI TIẾT (EXCEL)",
+        data=output.getvalue(),
+        file_name=f"BANG_KE_CHI_TIET_{so_ngay_int}_NGAY.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
