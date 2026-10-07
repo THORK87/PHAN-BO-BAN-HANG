@@ -15,5 +15,16 @@
     "details": {
       "timestamp": "17/09/2026 07:59:36"
     }
+  },
+  {
+    "timestamp": "07/10/2026 03:10:07",
+    "type": "LOGIN_FAILED",
+    "details": {
+      "reason": "KEY_EXPIRED",
+      "key": "00000-20260924-F3A2-CE50",
+      "client_name": "TUAN DAT",
+      "expiry_date": "30/09/2026",
+      "timestamp": "07/10/2026 03:10:07"
+    }
   }
 ]
