@@ -1,4 +1,5 @@
 import base64
+import streamlit.components.v1 as components
 from datetime import date, datetime
 import io
 import json
@@ -835,112 +836,132 @@ if btn_run:
 
     st.markdown("#### 📋 BẢNG KÊ CHI TIẾT BÁN HÀNG THEO NGÀY")
 
-    # Xây dựng bảng giao diện chuẩn màu sắc và viền
-    html_code = """
-    <style>
-        .sales-table-wrap {
-            width: 100%;
-            overflow-x: auto;
-            max-height: 650px;
-            border: 1px solid #d5d5d5;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }
-        .sales-table-custom {
-            width: 100%;
-            border-collapse: collapse;
-            font-family: Arial, sans-serif;
-            font-size: 13px;
-            color: #111;
-            background-color: #fff;
-        }
-        .sales-table-custom th {
-            padding: 8px 10px;
-            font-weight: bold;
-            color: #ffffff;
-            text-align: center;
-            border: 1px solid #e0e0e0;
-        }
-        .sales-table-custom th.col-green {
-            background-color: #4F7942;
-            width: 13%;
-        }
-        .sales-table-custom th.col-orange {
-            background-color: #E26B00;
-        }
-        .sales-table-custom td {
-            padding: 6px 10px;
-            border-bottom: 1px solid #f2f2f2;
-            vertical-align: middle;
-        }
-        .sales-table-custom tr:hover {
-            background-color: #fbfbfb;
-        }
-        .td-c { text-align: center; }
-        .td-l { text-align: left; }
-        .td-r { text-align: right; }
-        .td-boxed {
-            text-align: right;
-            border: 1.5px solid #222 !important;
-            font-weight: 500;
-        }
-        .tfoot-sum {
-            background-color: #FFF2CC;
-            font-weight: bold;
-            border-top: 2px solid #aaa;
-        }
-    </style>
-    <div class="sales-table-wrap">
-    <table class="sales-table-custom">
-        <thead>
-            <tr>
-                <th class="col-green">Ngày HĐ</th>
-                <th class="col-orange">Mã hàng (*)</th>
-                <th class="col-orange">Tên hàng</th>
-                <th class="col-orange">ĐVT</th>
-                <th class="col-orange">Số lượng</th>
-                <th class="col-orange">Đơn giá</th>
-                <th class="col-orange">Thành tiền</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
+    import streamlit.components.v1 as components
 
+    # 1. Tạo chuỗi HTML các dòng (không dùng khoảng trắng thụt lề đầu dòng để tránh lỗi Markdown)
+    body_rows = []
     for r in records_hien_thi:
         sl_fmt = f"{r['so_luong']:,d}".replace(",", ".")
         gia_fmt = f"{r['don_gia']:,d}".replace(",", ".")
         tien_fmt = f"{r['thanh_tien']:,d}".replace(",", ".")
-        html_code += f"""
-            <tr>
-                <td class="td-c" style="font-weight:bold; color:#1b5e20;">{r['ngay_in']}</td>
-                <td class="td-l">{r['ma_hang']}</td>
-                <td class="td-l">{r['ten_hang']}</td>
-                <td class="td-c">{r['dvt']}</td>
-                <td class="td-r">{sl_fmt}</td>
-                <td class="td-r">{gia_fmt}</td>
-                <td class="td-boxed">{tien_fmt}</td>
-            </tr>
-        """
+        body_rows.append(
+            f'<tr>'
+            f'<td class="td-c" style="font-weight:bold; color:#1b5e20;">{r["ngay_in"]}</td>'
+            f'<td class="td-l">{r["ma_hang"]}</td>'
+            f'<td class="td-l">{r["ten_hang"]}</td>'
+            f'<td class="td-c">{r["dvt"]}</td>'
+            f'<td class="td-r">{sl_fmt}</td>'
+            f'<td class="td-r">{gia_fmt}</td>'
+            f'<td class="td-boxed">{tien_fmt}</td>'
+            f'</tr>'
+        )
 
     sum_sl_fmt = f"{tong_sl_ban_tat_ca:,d}".replace(",", ".")
     sum_tien_fmt = f"{tong_tien_thuc_te:,d}".replace(",", ".")
-    html_code += f"""
-        </tbody>
-        <tfoot>
-            <tr class="tfoot-sum">
-                <td colspan="4" class="td-c" style="padding: 10px;">TỔNG CỘNG PHÂN BỔ</td>
-                <td class="td-r" style="padding: 10px;">{sum_sl_fmt}</td>
-                <td></td>
-                <td class="td-boxed" style="padding: 10px; color: #b71c1c; font-size: 14px;">{sum_tien_fmt}</td>
-            </tr>
-        </tfoot>
-    </table>
-    </div>
+
+    raw_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            font-family: Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: transparent;
+        }}
+        .table-container {{
+            width: 100%;
+            max-height: 580px;
+            overflow-y: auto;
+            border: 1px solid #d5d5d5;
+            border-radius: 4px;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            color: #111;
+            background-color: #fff;
+        }}
+        thead th {{
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            padding: 8px 10px;
+            font-weight: bold;
+            color: #ffffff;
+            text-align: center;
+        }}
+        th.col-green {{
+            background-color: #4F7942;
+            width: 13%;
+        }}
+        th.col-orange {{
+            background-color: #E26B00;
+        }}
+        td {{
+            padding: 6px 10px;
+            border-bottom: 1px solid #eeeeee;
+            vertical-align: middle;
+        }}
+        tr:hover td {{
+            background-color: #f8f9fa;
+        }}
+        .td-c {{ text-align: center; }}
+        .td-l {{ text-align: left; }}
+        .td-r {{ text-align: right; }}
+        .td-boxed {{
+            text-align: right;
+            border: 1.5px solid #222222 !important;
+            font-weight: 600;
+        }}
+        tfoot tr {{
+            position: sticky;
+            bottom: 0;
+            background-color: #FFF2CC;
+            font-weight: bold;
+            border-top: 2px solid #888;
+        }}
+    </style>
+    </head>
+    <body>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="col-green">Ngày HĐ</th>
+                        <th class="col-orange">Mã hàng (*)</th>
+                        <th class="col-orange">Tên hàng</th>
+                        <th class="col-orange">ĐVT</th>
+                        <th class="col-orange">Số lượng</th>
+                        <th class="col-orange">Đơn giá</th>
+                        <th class="col-orange">Thành tiền</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(body_rows)}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="4" class="td-c" style="padding: 9px;">TỔNG CỘNG PHÂN BỔ</td>
+                        <td class="td-r" style="padding: 9px;">{sum_sl_fmt}</td>
+                        <td></td>
+                        <td class="td-boxed" style="padding: 9px; color: #b71c1c; font-size: 14px;">{sum_tien_fmt}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </body>
+    </html>
     """
 
-    st.markdown(html_code, unsafe_allow_html=True)
+    components.html(raw_html, height=600, scrolling=True)
 
     # --- TẠO FILE EXCEL ĐỊNH DẠNG MÀU SẮC CHUẨN MẪU ---
+    from openpyxl.styles import Border, Side
+
     df_excel_export = pd.DataFrame(
         [
             {
