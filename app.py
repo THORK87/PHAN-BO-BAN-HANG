@@ -630,14 +630,28 @@ else:
         ]
     )
 
+# Khởi tạo bảng dữ liệu trong session_state nếu chưa có
+if "df_data" not in st.session_state:
+  st.session_state.df_data = df_init.copy()
+
+# Cấu hình hiển thị cột cho bảng nhập liệu
+col_config = {
+    "ĐƠN GIÁ": st.column_config.NumberColumn("ĐƠN GIÁ (VNĐ)", format="%d"),
+    "TỒN ĐẦU": st.column_config.NumberColumn("TỒN ĐẦU", format="%d"),
+}
+
+# Nếu đã có cột TỒN CUỐI thì khóa không cho sửa cột này (chỉ xem)
+if "TỒN CUỐI" in st.session_state.df_data.columns:
+  col_config["TỒN CUỐI"] = st.column_config.NumberColumn(
+      "TỒN CUỐI (Sau phân bổ)", format="%d", disabled=True
+  )
+
 edited_df = st.data_editor(
-    df_init,
+    st.session_state.df_data,
     num_rows="dynamic",
     use_container_width=True,
-    column_config={
-        "ĐƠN GIÁ": st.column_config.NumberColumn("ĐƠN GIÁ (VNĐ)", format="%d"),
-        "TỒN ĐẦU": st.column_config.NumberColumn("TỒN ĐẦU", format="%d"),
-    },
+    column_config=col_config,
+    key="data_editor_main",
 )
 
 # =========================================================================
@@ -720,6 +734,8 @@ if btn_run:
 
     tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
     ton_con_lai = ton_arr - bu_arr
+    # Cập nhật cột TỒN CUỐI ngược lại vào bảng nhập liệu phía trên
+    st.session_state.df_data["TỒN CUỐI"] = df_items["TỒN CUỐI"].values
     tong_ton_con_lai_vnd = np.sum(ton_con_lai * gia_arr)
 
     if tien_con_lai > 0 and tong_ton_con_lai_vnd > 0:
