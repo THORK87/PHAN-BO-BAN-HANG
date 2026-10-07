@@ -741,11 +741,36 @@ if btn_run:
 
     tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
     ton_con_lai = ton_arr - bu_arr
-    # Cập nhật chính xác TỒN CUỐI vào bảng nhập liệu theo MÃ VTHH (chuẩn 100%, không lệch dòng)
-    map_ton_cuoi = dict(zip(df_items["MÃ VTHH"], df_items["TỒN CUỐI"]))
-    st.session_state.df_data["TỒN CUỐI"] = st.session_state.df_data["MÃ VTHH"].map(map_ton_cuoi).fillna(st.session_state.df_data["TỒN ĐẦU"]).astype(int)
+    tong_ton_con_lai_vnd = np.sum(ton_con_lai * gia_arr)
 
     if tien_con_lai > 0 and tong_ton_con_lai_vnd > 0:
+        ti_le_phu = min(1.0, tien_con_lai / tong_ton_con_lai_vnd)
+        sl_them = np.floor(ton_con_lai * ti_le_phu).astype(int)
+        sl_them = np.minimum(sl_them, ton_con_lai)
+        bu_arr += sl_them
+        tien_hien_tai = np.sum(bu_arr * gia_arr)
+
+    tien_con_lai = tong_tien_muc_tieu - tien_hien_tai
+    if tien_con_lai > 0:
+        for i in range(n):
+            if gia_arr[i] > 0 and bu_arr[i] < ton_arr[i]:
+                sl_bu_max = ton_arr[i] - bu_arr[i]
+                sl_can_bu = int(tien_con_lai // gia_arr[i])
+                sl_thuc_bu = min(sl_bu_max, sl_can_bu)
+                if sl_thuc_bu > 0:
+                    bu_arr[i] += sl_thuc_bu
+                    tien_con_lai -= sl_thuc_bu * gia_arr[i]
+                    if tien_con_lai < np.min(gia_arr[gia_arr > 0]):
+                        break
+
+    df_items["TỔNG SL BÁN"] = bu_arr
+    df_items["THÀNH TIỀN"] = bu_arr * gia_arr
+    df_items["TỒN CUỐI"] = ton_arr - bu_arr
+
+    # Cập nhật chuẩn TỒN CUỐI vào bảng nhập liệu theo MÃ VTHH
+    if "df_data" in st.session_state:
+        map_ton_cuoi = dict(zip(df_items["MÃ VTHH"], df_items["TỒN CUỐI"]))
+        st.session_state.df_data["TỒN CUỐI"] = st.session_state.df_data["MÃ VTHH"].map(map_ton_cuoi).fillna(st.session_state.df_data["TỒN ĐẦU"]).astype(int)
         ti_le_phu = min(1.0, tien_con_lai / tong_ton_con_lai_vnd)
         sl_them = np.floor(ton_con_lai * ti_le_phu).astype(int)
         sl_them = np.minimum(sl_them, ton_con_lai)
