@@ -54,20 +54,20 @@ def get_remote_licenses():
     return {}, None
 
 
-def update_remote_licenses(new_data, sha=None):
+def update_remote_activity_log(new_data, sha=None):
     try:
-        content_str = json.dumps(new_data, ensure_ascii=False, indent=4)
+        content_str = json.dumps(new_data, ensure_ascii=False, indent=2)
         content_b64 = base64.b64encode(content_str.encode("utf-8")).decode(
             "utf-8"
         )
         payload = {
-            "message": f"Update licenses.json via Admin - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            "message": f"Update activity log - {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
             "content": content_b64,
             "branch": GITHUB_BRANCH,
         }
         if sha:
             payload["sha"] = sha
-        res = requests.put(LICENSES_API_URL, headers=HEADERS, json=payload)
+        res = requests.put(ACTIVITY_LOG_API_URL, headers=HEADERS, json=payload)
         return res.status_code in [200, 201]
     except Exception:
         return False
