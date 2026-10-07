@@ -783,7 +783,7 @@ if btn_run:
                 for d_idx in top_days:
                     matrix_ngay[i, d_idx] += 1
 
-    # =========================================================================
+ # =========================================================================
     # 4. HIỂN THỊ KẾT QUẢ THEO MẪU BẢNG KÊ & XUẤT FILE EXCEL
     # =========================================================================
     st.divider()
@@ -797,50 +797,40 @@ if btn_run:
     m2.metric("ĐÃ PHÂN BỔ THỰC TẾ", f"{tong_tien_thuc_te:,.0f} đ")
     m3.metric("CHÊNH LỆCH", f"{chenh_lech:,.0f} đ")
 
-    # Gom dữ liệu dạng bảng kê từ trên xuống dưới theo từng ngày bán
+    # Gom dữ liệu dạng bảng kê từ trên xuống dưới (Ngày HĐ lặp lại đầy đủ ở từng dòng)
     records_hien_thi = []
     excel_records = []
 
     for d_idx in range(so_ngay_int):
-        cur_date_str = (ngay_bat_dau + pd.Timedelta(days=d_idx)).strftime(
-            "%d/%m/%Y"
-        )
-        first_item = True
+        cur_date_str = (ngay_bat_dau + pd.Timedelta(days=d_idx)).strftime("%d/%m/%Y")
         for i in range(n):
             sl = matrix_ngay[i, d_idx]
             if sl > 0:
                 gia = int(gia_arr[i])
                 thanh_tien = int(sl * gia)
-                date_display = cur_date_str if first_item else ""
-                first_item = False
 
-                records_hien_thi.append(
-                    {
-                        "ngay": date_display,
-                        "ma": df_items.loc[i, "MÃ VTHH"],
-                        "ten": df_items.loc[i, "TÊN VTHH"],
-                        "dvt": df_items.loc[i, "ĐVT"],
-                        "sl": sl,
-                        "gia": f"{gia:,.0f}".replace(",", "."),
-                        "tien": f"{thanh_tien:,.0f}".replace(",", "."),
-                    }
-                )
+                records_hien_thi.append({
+                    "ngay": cur_date_str,  # Luôn hiển thị ngày HĐ, trùng vẫn hiện
+                    "ma": df_items.loc[i, "MÃ VTHH"],
+                    "ten": df_items.loc[i, "TÊN VTHH"],
+                    "dvt": df_items.loc[i, "ĐVT"],
+                    "sl": sl,
+                    "gia": f"{gia:,.0f}".replace(",", "."),
+                    "tien": f"{thanh_tien:,.0f}".replace(",", ".")
+                })
 
-                excel_records.append(
-                    {
-                        "Ngày HĐ": date_display,
-                        "Mã hàng (*)": df_items.loc[i, "MÃ VTHH"],
-                        "Tên hàng": df_items.loc[i, "TÊN VTHH"],
-                        "ĐVT": df_items.loc[i, "ĐVT"],
-                        "Số lượng": sl,
-                        "Đơn giá": gia,
-                        "Thành tiền": thanh_tien,
-                    }
-                )
+                excel_records.append({
+                    "Ngày HĐ": cur_date_str,  # File Excel cũng hiện đầy đủ ngày từng dòng
+                    "Mã hàng (*)": df_items.loc[i, "MÃ VTHH"],
+                    "Tên hàng": df_items.loc[i, "TÊN VTHH"],
+                    "ĐVT": df_items.loc[i, "ĐVT"],
+                    "Số lượng": sl,
+                    "Đơn giá": gia,
+                    "Thành tiền": thanh_tien
+                })
 
     st.markdown("#### 📋 CHI TIẾT SẢN LƯỢNG BÁN THEO MẶT HÀNG")
 
-    # Xây dựng từng dòng HTML không thụt lề để tránh bị Markdown nhận nhầm thành code block
     tbody_html = ""
     for r in records_hien_thi:
         tbody_html += (
@@ -887,7 +877,7 @@ if btn_run:
     .sales-grid-table tr:hover {{
         background-color: #f7f9fa;
     }}
-    .c-date {{ text-align: center; font-weight: bold; }}
+    .c-date {{ text-align: center; }}
     .c-center {{ text-align: center; }}
     .c-left {{ text-align: left; }}
     .c-right {{ text-align: right; }}
