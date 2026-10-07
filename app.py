@@ -832,7 +832,6 @@ if btn_run:
                         "thanh_tien": thanh_tien,
                     }
                 )
-                is_first = False
 
     st.markdown("#### 📋 BẢNG KÊ CHI TIẾT BÁN HÀNG THEO NGÀY")
 
