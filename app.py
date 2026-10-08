@@ -195,7 +195,7 @@ if not st.session_state.is_licensed and not st.session_state.is_admin:
                     st.session_state.is_licensed = True
                     st.session_state.current_client_name = client_name
                     st.sidebar.success(
-                        f"Hợp lệ! Hạn sử dụng: {exp_date.strftime('%d/%m/%Y')}"
+                        f"Hợp lệ!"
                     )
                     log_activity(
                         "LOGIN_SUCCESS",
